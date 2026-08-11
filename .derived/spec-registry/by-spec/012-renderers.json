@@ -43,6 +43,6 @@
     "summary": "The contract for the presentation layer: crates/icebeek-render-exterior (the Macro, isometric 3D), crates/icebeek-render-interior (the Micro, top-down cross-section), and crates/icebeek-app (the one binary and the host). The shared rules make spec 008 requirement 5 structural: render crates read simulation state through queries and push typed commands, never mutating state directly; presentation entities are never serialized; every visual interpolates between the last two sim ticks. The app owns the window, the fixed-timestep driver that ticks the sim, input capture into commands, save/load orchestration, and the single fast camera/audio crossfade between views. The sim ticks regardless of which view is focused: the unfocused renderer idles, the simulation never does. Crate directory edges are added when the crates land; until then this spec owns its design brief.\n",
     "title": "The renderers: two views, one shell, read-only over one truth"
   },
-  "shardHash": "b93518d07ad4ecb6f87dc4dbff43be30b3e9806629e29f0d1837a2c1340fee22",
+  "shardHash": "8648ee9928e391603681cae33aa693fa5dbaf70d9038cee77d348ff19fd97777",
   "specVersion": "1.1.0"
 }

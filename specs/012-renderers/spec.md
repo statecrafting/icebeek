@@ -59,6 +59,12 @@ Binding on both render crates:
 3. **Interpolate, never extrapolate.** Visuals interpolate between
    the last two completed sim ticks (spec 010 §3). Renderers never
    predict future state and never read frame time into gameplay.
+   The interpolation source is the sim crate's typed snapshot read
+   API (spec 010 §6): after every completed tick the app captures a
+   snapshot and keeps exactly the last two; render systems blend
+   between that pair using the fixed-timestep accumulator's overstep
+   fraction, clamped to [0, 1]. Snapshots are copies: holding one
+   mutates nothing, blocks nothing, and is never serialized.
 4. **Full Bevy is allowed here.** The render crates and the app are
    the only crates that may depend on the `bevy` umbrella (spec 009
    §3.3, spec 010 §2 forbids it in the sim).

@@ -8,6 +8,7 @@
 
 mod rng;
 mod state;
+mod view;
 
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{LogLevel, ScheduleBuildSettings, SingleThreadedExecutor};
@@ -22,6 +23,7 @@ pub use state::{
     EventBus, ExpeditionState, HULL_NODES, Helm, HullGraph, OPERATING_C, Routing, RuleAction,
     SHUTDOWN_LADDER, ShipKinetics, ShipSystem, SimTick, ThermalField, WeatherState, WorldDomain,
 };
+pub use view::{SimSnapshot, SimSnapshots};
 
 use icebeek_events::{EventPayload, ExpeditionEvent, ResourceKind, WeatherEvent};
 
@@ -298,6 +300,34 @@ impl SimWorld {
     }
 
     /// Diagnostics from the most recent tick (not part of the save).
+    /// The presentation read path (spec 010 section 6, spec 012
+    /// section 2): copy the render-relevant surface at the last
+    /// completed tick. Holding a snapshot mutates nothing and never
+    /// blocks the sim.
+    pub fn snapshot(&self) -> SimSnapshot {
+        let kinetics = self.world.resource::<ShipKinetics>();
+        let helm = self.world.resource::<Helm>();
+        let engine = self.world.resource::<EngineCore>();
+        let domain = self.world.resource::<WorldDomain>();
+        SimSnapshot {
+            tick: self.world.resource::<SimTick>().0,
+            position: kinetics.position,
+            heading_rad: helm.heading_rad,
+            speed: kinetics.speed,
+            hull_stress: self.world.resource::<HullGraph>().stress,
+            compartment_temps: self.world.resource::<ThermalField>().temps,
+            core_temperature: engine.temperature,
+            fuel_fraction: (engine.fuel_buffer / FUEL_BUFFER_CAP).clamp(0.0, 1.0),
+            shutdown_stage: engine.shutdown_stage,
+            cargo: self.world.resource::<CargoHold>().amounts,
+            storm_active: domain.weather.storm_ticks > 0,
+            flare_active: domain.weather.flare_ticks > 0,
+            site_available: domain.expedition.site_available,
+            anchored_at_site: domain.expedition.anchored_at_site,
+            crush_pressure: domain.expedition.crush_pressure,
+        }
+    }
+
     pub fn last_trace(&self) -> &TickTrace {
         &self.last_trace
     }

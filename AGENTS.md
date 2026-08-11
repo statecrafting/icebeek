@@ -84,13 +84,16 @@ review; approved specs are settled authority.
 | 13 | `012-renderers` | approved (2026-08-11) |
 | 14 | `013-ci` | approved (2026-08-11) |
 
-Next pending: the simulation slice is mechanically complete: all
-four event families resolve into interior state, and the world
-domain's weather and expedition machines generate them (specs 004
-through 006 over the spec 010 phase order). The remaining
-vertical-slice work: first visuals in both renderers and input
-capture in the app (spec 012). Each substantial chunk is its own
-PR through both gates.
+Next pending: the vertical slice is complete end to end. The sim
+resolves all four event families through every phase; both
+renderers draw first visuals over the snapshot read API (exterior:
+ocean, ship, site marker, weather light; interior: heat overlay,
+stress bars, core and fuel gauges); the app captures input into
+typed commands and owns the view switch. Corpus growth from here
+(ice classes and topography content, the buildable interior grid,
+tech tiers, save versioning) needs new specs authored and
+approved: a human checkpoint, not a mechanical continuation of
+this table.
 
 ## Available Agents
 
