@@ -1,0 +1,36 @@
+{
+  "record": {
+    "created": "2026-08-11",
+    "dependsOn": [
+      "002-dual-view-architecture",
+      "008-simulation-substrate",
+      "009-cargo-workspace",
+      "010-simulation-core"
+    ],
+    "establishes": [
+      {
+        "kind": "file",
+        "path": "docs/design/event-bus.md"
+      }
+    ],
+    "id": "011-event-bus",
+    "sectionHeadings": [
+      "011: Event bus",
+      "1. Purpose",
+      "2. Scope boundary: events, not commands",
+      "3. The envelope",
+      "4. Initial event families",
+      "5. Queue semantics",
+      "6. Dependency and purity rules",
+      "7. Test contract",
+      "8. Territory",
+      "9. Out of scope"
+    ],
+    "specPath": "specs/011-event-bus/spec.md",
+    "status": "approved",
+    "summary": "The contract for crates/icebeek-events, the engine-free vocabulary crate for the spec 002 coupling contract. It defines the event envelope (emission tick, deterministic sequence number, and, where the family calls for it, hull-graph location and magnitude), the initial event families (Impact, Ingestion, Weather, Expedition), and the queue semantics: FIFO ordered by tick and sequence, visible to the interior phase of the same tick, backlog legal, serialized whole into saves. Events are pure data: the crate contains types and the queue container, no systems, no callbacks, no game logic, and depends on serde and the standard library only. Player command types are explicitly not here; they live in icebeek-sim per spec 010 section 6. The crate directory edge is added when the crate lands; until then this spec owns its design brief.\n",
+    "title": "Event bus: the typed exterior-traffic vocabulary"
+  },
+  "shardHash": "c53c44f79852a19b409b17da458c6f3b0fb10682c7d7fe4047728fd1bb38da09",
+  "specVersion": "1.1.0"
+}
