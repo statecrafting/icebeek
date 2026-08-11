@@ -85,13 +85,15 @@ impl CargoHold {
         self.amounts[Self::index(resource)]
     }
 
-    /// A fresh run's provisions: enough fuel and coolant stock to keep
-    /// the core burning until the first intake comes in (spec 003
-    /// section 2; quantities are balancing placeholders).
+    /// A fresh run's provisions: enough fuel, coolant stock, and strut
+    /// feedstock to keep the core burning and the repair line working
+    /// until the first intake comes in (spec 003 section 2; quantities
+    /// are balancing placeholders).
     pub fn starting_provisions() -> Self {
         let mut hold = Self::default();
         hold.amounts[Self::index(ResourceKind::Biomass)] = 200;
         hold.amounts[Self::index(ResourceKind::Ice)] = 50;
+        hold.amounts[Self::index(ResourceKind::FrozenScrap)] = 40;
         hold
     }
 }
@@ -155,6 +157,142 @@ impl EngineCore {
     }
 }
 
+/// What a drone is for (spec 005 section 2). Scout rovers arrive with
+/// the expedition slice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DroneKind {
+    Repair,
+    Logistics,
+}
+
+/// A contiguous, inclusive hull-node range a drone patrols.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DroneZone {
+    pub from: u32,
+    pub to: u32,
+}
+
+impl DroneZone {
+    pub fn contains(&self, node: u32) -> bool {
+        node >= self.from && node <= self.to
+    }
+}
+
+/// Drones are equipment, not characters: uptime, capacity, and
+/// maintenance cost only (spec 005 section 2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Drone {
+    pub kind: DroneKind,
+    pub zone: DroneZone,
+    /// Accumulated wear in [0, 1]; uptime is its complement.
+    pub wear: f32,
+    /// Fractional strut-feedstock consumption owed to the hold.
+    pub strut_meter: f32,
+}
+
+impl Drone {
+    /// Fraction of nominal duty currently available.
+    pub fn uptime(&self) -> f32 {
+        (1.0 - self.wear).clamp(0.0, 1.0)
+    }
+}
+
+/// Drone fleet domain (spec 010 section 5). Vec order is spawn order,
+/// and spawn order is action order (determinism discipline).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Resource)]
+pub struct DroneFleet {
+    pub drones: Vec<Drone>,
+}
+
+impl Default for DroneFleet {
+    fn default() -> Self {
+        // A fresh run ships with two repair drones splitting the hull.
+        Self {
+            drones: vec![
+                Drone {
+                    kind: DroneKind::Repair,
+                    zone: DroneZone { from: 0, to: 3 },
+                    wear: 0.0,
+                    strut_meter: 0.0,
+                },
+                Drone {
+                    kind: DroneKind::Repair,
+                    zone: DroneZone {
+                        from: 4,
+                        to: (HULL_NODES - 1) as u32,
+                    },
+                    wear: 0.0,
+                    strut_meter: 0.0,
+                },
+            ],
+        }
+    }
+}
+
+/// What a tier-1 rule can test (spec 005 section 3: levels,
+/// temperatures, stress values).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum Condition {
+    /// True unconditionally; the ELSE arm of a rule pair.
+    Always,
+    FuelBufferBelow(f32),
+    CoreTempAbove(f32),
+    CoreTempBelow(f32),
+    StockBelow {
+        resource: ResourceKind,
+        amount: u64,
+    },
+    StressAbove {
+        node: u32,
+        level: f32,
+    },
+}
+
+/// What a tier-1 rule can set: routing switches, never state directly
+/// (spec 005 section 3).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum RuleAction {
+    SetFeedEnabled(bool),
+    SetCoolantEnabled(bool),
+}
+
+/// One player-authored gate: IF condition THEN action.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AutomationRule {
+    /// Assigned from `next_rule_id` at add; stable across reorders.
+    pub id: u32,
+    pub condition: Condition,
+    pub action: RuleAction,
+}
+
+/// Automation rules domain (spec 010 section 5): the stored list order
+/// is the player-visible evaluation order; later rules win conflicting
+/// writes (spec 010 section 5, spec 005 section 3).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Resource)]
+pub struct AutomationRules {
+    pub rules: Vec<AutomationRule>,
+    pub next_rule_id: u32,
+}
+
+/// The routing switches rules act on. Written by rule evaluation at
+/// the start of the interior phase, read by the systems behind it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Resource)]
+pub struct Routing {
+    /// Belt switch: the hold-to-core feed line.
+    pub feed_enabled: bool,
+    /// Valve: the coolant loop.
+    pub coolant_enabled: bool,
+}
+
+impl Default for Routing {
+    fn default() -> Self {
+        Self {
+            feed_enabled: true,
+            coolant_enabled: true,
+        }
+    }
+}
+
 /// Thermal field domain (spec 004 section 5): compartment temperatures
 /// in degrees C, indexed like hull-graph nodes for the vertical slice.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Resource)]
@@ -213,8 +351,27 @@ impl EventBus {
 /// crate (spec 011 section 2).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Command {
-    SetHeading { heading_rad: f32 },
-    SetThrottle { throttle: f32 },
+    SetHeading {
+        heading_rad: f32,
+    },
+    SetThrottle {
+        throttle: f32,
+    },
+    /// Append a rule; its id comes from the monotonic counter.
+    AddRule {
+        condition: Condition,
+        action: RuleAction,
+    },
+    /// Remove the rule with this id; unknown ids are ignored.
+    RemoveRule {
+        id: u32,
+    },
+    /// Reassign a drone's patrol zone; out-of-range indices are
+    /// ignored, node bounds are clamped to the hull.
+    SetDroneZone {
+        drone: u32,
+        zone: DroneZone,
+    },
 }
 
 /// Pending commands, applied by the commands phase in push order.

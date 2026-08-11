@@ -140,6 +140,18 @@ field latitude, so they are pinned here:
   For the vertical slice the compartment set aligns one-to-one with
   hull-graph nodes; the real room graph arrives with the interior
   grid domain.
+- **Rule evaluation.** Automation rules evaluate once per tick at the
+  start of the interior phase, in their stored, player-visible list
+  order (spec 005 §3). When two rules write the same routing switch,
+  the later rule in list order wins. Rule ids come from a monotonic
+  counter that serializes with the save; evaluation reads state as of
+  the end of the world phase and never observes mid-tick interior
+  writes.
+- **Drone determinism.** Drones act in spawn order. A repair drone
+  serves the most stressed node inside its assigned zone, ties broken
+  by the lowest node index; work accrues wear, and maintenance draws
+  stock in whole units. Drones idle while the shutdown ladder has the
+  drone bays down.
 
 ## 6. Write paths
 
