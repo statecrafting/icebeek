@@ -76,7 +76,8 @@ default. Section 4 turns that from a hazard into a discipline.
      repair. A backlog may remain (spec 002 §3.4).
   4. **Readback**: interior outcomes are written to shared capability
      state (available thrust, turning rate, prow options, sensor
-     coverage) that the next tick's world phase reads (spec 002 §3.3).
+     coverage, intake capacity) that the next tick's world phase
+     reads (spec 002 §3.3).
 
 ## 4. Determinism discipline
 
@@ -152,6 +153,19 @@ field latitude, so they are pinned here:
   by the lowest node index; work accrues wear, and maintenance draws
   stock in whole units. Drones idle while the shutdown ladder has the
   drone bays down.
+- **Weather resolution.** Weather events resolve into typed
+  equipment state: valve and sensor freezes thaw on a tick countdown
+  or by a manual-override command, and a drone scramble suppresses
+  fleet logic for a tick-counted window while belts (the feed line)
+  keep running (spec 006 §5). Onset and end travel as paired events
+  (spec 011 §5); the interior never deletes queue entries to end a
+  storm. Frozen valves and sensors degrade the intake-capacity and
+  sensor-coverage readback, which the next tick's world phase reads.
+- **Expedition resolution.** Anchoring is an ordered helm state;
+  expedition emissions happen only while anchored at a site. Crush
+  progression resolves as ambient stress distributed across the
+  whole hull graph, and extraction hauls travel as ordinary
+  Ingestion events (spec 006 §4).
 
 ## 6. Write paths
 

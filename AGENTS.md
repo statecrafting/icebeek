@@ -84,13 +84,13 @@ review; approved specs are settled authority.
 | 13 | `012-renderers` | approved (2026-08-11) |
 | 14 | `013-ci` | approved (2026-08-11) |
 
-Next pending: the interior control plane is live: engine core,
-thermal field, drone fleet, and tier-1 automation rules (spec 010
-§5, specs 004 and 005). The remaining vertical-slice work, in
-order: resolve the Weather and Expedition event families into
-interior state (spec 006, the world domain), then first visuals in
-the renderers. Each substantial chunk is its own PR through both
-gates.
+Next pending: the simulation slice is mechanically complete: all
+four event families resolve into interior state, and the world
+domain's weather and expedition machines generate them (specs 004
+through 006 over the spec 010 phase order). The remaining
+vertical-slice work: first visuals in both renderers and input
+capture in the app (spec 012). Each substantial chunk is its own
+PR through both gates.
 
 ## Available Agents
 

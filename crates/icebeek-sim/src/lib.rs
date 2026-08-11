@@ -18,12 +18,12 @@ pub use icebeek_events as events;
 pub use rng::SimRng;
 pub use state::{
     AMBIENT_C, AutomationRule, AutomationRules, COMPARTMENTS, Capability, CargoHold, Command,
-    CommandQueue, Condition, Drone, DroneFleet, DroneKind, DroneZone, EngineCore, EventBus,
-    HULL_NODES, Helm, HullGraph, OPERATING_C, Routing, RuleAction, SHUTDOWN_LADDER, ShipKinetics,
-    ShipSystem, SimTick, ThermalField,
+    CommandQueue, Condition, Drone, DroneFleet, DroneKind, DroneZone, EngineCore, Equipment,
+    EventBus, ExpeditionState, HULL_NODES, Helm, HullGraph, OPERATING_C, Routing, RuleAction,
+    SHUTDOWN_LADDER, ShipKinetics, ShipSystem, SimTick, ThermalField, WeatherState, WorldDomain,
 };
 
-use icebeek_events::{EventPayload, ResourceKind};
+use icebeek_events::{EventPayload, ExpeditionEvent, ResourceKind, WeatherEvent};
 
 /// Ticks per simulated second (spec 010 section 3). Amend spec 010 to
 /// tune; saves record the rate they were written under.
@@ -91,6 +91,36 @@ const CORE_COUPLING_PER_SECOND: f32 = 0.1;
 /// Compartment hosting the engine core.
 const CORE_COMPARTMENT: usize = 0;
 
+/// Per-second chance of a super-storm onset while the sky is clear.
+const STORM_CHANCE_PER_SECOND: f32 = 0.02;
+/// Shortest super-storm, in ticks; the RNG adds up to as much again.
+const STORM_BASE_TICKS: u32 = 200;
+/// Per-second chance a storm freezes a valve or sensor somewhere.
+const FREEZE_CHANCE_PER_SECOND: f32 = 0.5;
+/// Ticks a frozen valve or sensor takes to thaw on its own.
+const THAW_TICKS: u32 = 300;
+/// Per-second chance of a solar flare onset while the sky is clear.
+const FLARE_CHANCE_PER_SECOND: f32 = 0.01;
+/// Shortest solar flare, in ticks; the RNG adds up to as much again.
+const FLARE_BASE_TICKS: u32 = 100;
+/// Per-second chance an active flare scrambles drone logic.
+const SCRAMBLE_CHANCE_PER_SECOND: f32 = 0.4;
+/// Ticks a drone scramble lasts.
+const SCRAMBLE_TICKS: u32 = 100;
+/// Per-second chance of sighting an Iceberg Node while under way.
+const SITE_CHANCE_PER_SECOND: f32 = 0.05;
+/// Crush pressure accrued per second while anchored at a site.
+const CRUSH_RATE_PER_SECOND: f32 = 0.01;
+/// Ticks between CrushProgress emissions while anchored.
+const CRUSH_EVENT_TICKS: u32 = 20;
+/// Hull stress each CrushProgress event distributes to every node,
+/// scaled by the pressure it carries.
+const CRUSH_STRESS_SCALE: f32 = 0.02;
+/// Per-second chance of an ice-shift warning while anchored.
+const WARNING_CHANCE_PER_SECOND: f32 = 0.1;
+/// Ticks between rover hauls while anchored.
+const HAUL_TICKS: u32 = 40;
+
 /// The four phases of a tick, in their fixed total order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
@@ -130,6 +160,8 @@ pub struct SaveState {
     pub drones: DroneFleet,
     pub rules: AutomationRules,
     pub routing: Routing,
+    pub equipment: Equipment,
+    pub world: WorldDomain,
     pub cargo: CargoHold,
     pub capability: Capability,
     pub rng: SimRng,
@@ -185,6 +217,8 @@ impl SimWorld {
         world.insert_resource(DroneFleet::default());
         world.insert_resource(AutomationRules::default());
         world.insert_resource(Routing::default());
+        world.insert_resource(Equipment::default());
+        world.insert_resource(WorldDomain::default());
         world.insert_resource(CargoHold::starting_provisions());
         world.insert_resource(Capability::default());
         world.insert_resource(SimRng::from_seed(seed));
@@ -198,12 +232,22 @@ impl SimWorld {
         Self {
             world,
             commands_phase: phase_schedule((mark_commands, apply_commands).chain()),
-            world_phase: phase_schedule((mark_world, drive_kinetics, generate_ice_events).chain()),
+            world_phase: phase_schedule(
+                (
+                    mark_world,
+                    drive_kinetics,
+                    generate_ice_events,
+                    generate_weather,
+                    run_expedition,
+                )
+                    .chain(),
+            ),
             interior_phase: phase_schedule(
                 (
                     mark_interior,
                     evaluate_rules,
                     consume_events,
+                    thaw_equipment,
                     feed_engine,
                     burn_fuel,
                     route_coolant,
@@ -270,6 +314,8 @@ impl SimWorld {
             drones: self.world.resource::<DroneFleet>().clone(),
             rules: self.world.resource::<AutomationRules>().clone(),
             routing: self.world.resource::<Routing>().clone(),
+            equipment: self.world.resource::<Equipment>().clone(),
+            world: self.world.resource::<WorldDomain>().clone(),
             cargo: self.world.resource::<CargoHold>().clone(),
             capability: self.world.resource::<Capability>().clone(),
             rng: self.world.resource::<SimRng>().clone(),
@@ -295,6 +341,8 @@ impl SimWorld {
         world.insert_resource(save.drones);
         world.insert_resource(save.rules);
         world.insert_resource(save.routing);
+        world.insert_resource(save.equipment);
+        world.insert_resource(save.world);
         world.insert_resource(save.cargo);
         world.insert_resource(save.capability);
         world.insert_resource(save.rng);
@@ -350,11 +398,18 @@ fn apply_commands(
     mut helm: ResMut<Helm>,
     mut rules: ResMut<AutomationRules>,
     mut fleet: ResMut<DroneFleet>,
+    mut equipment: ResMut<Equipment>,
 ) {
     while let Some(command) = queue.pending.pop_front() {
         match command {
             Command::SetHeading { heading_rad } => helm.heading_rad = heading_rad,
             Command::SetThrottle { throttle } => helm.throttle = throttle.clamp(0.0, 1.0),
+            Command::SetAnchor { anchored } => helm.anchor_ordered = anchored,
+            Command::ManualThaw { node } => {
+                let node = node as usize % HULL_NODES;
+                equipment.valve_frozen[node] = 0;
+                equipment.sensor_frozen[node] = 0;
+            }
             Command::AddRule { condition, action } => {
                 let id = rules.next_rule_id;
                 rules.next_rule_id += 1;
@@ -389,7 +444,11 @@ fn drive_kinetics(
     capability: Res<Capability>,
     cargo: Res<CargoHold>,
 ) {
-    let speed = helm.throttle.min(capability.available_thrust) * MAX_SPEED;
+    let speed = if helm.anchor_ordered {
+        0.0
+    } else {
+        helm.throttle.min(capability.available_thrust) * MAX_SPEED
+    };
     kinetics.speed = speed;
     let cargo_units: u64 = cargo.amounts.iter().sum();
     kinetics.total_mass = BASE_MASS + cargo_units as f32 * CARGO_UNIT_MASS;
@@ -405,6 +464,7 @@ fn drive_kinetics(
 fn generate_ice_events(
     tick: Res<SimTick>,
     kinetics: Res<ShipKinetics>,
+    capability: Res<Capability>,
     mut rng: ResMut<SimRng>,
     mut bus: ResMut<EventBus>,
 ) {
@@ -417,10 +477,141 @@ fn generate_ice_events(
         let magnitude = 0.05 + 0.20 * rng.next_f32();
         bus.emit(tick.0, EventPayload::Impact { node, magnitude });
     }
-    if rng.next_f32() < INGEST_CHANCE_PER_SECOND * intensity * TICK_SECONDS {
+    // Frozen intake valves cut yield: last tick's readback scales the
+    // ingestion chance (spec 006 section 5, spec 002 section 3.3).
+    let ingest_chance =
+        INGEST_CHANCE_PER_SECOND * intensity * capability.intake_capacity * TICK_SECONDS;
+    if rng.next_f32() < ingest_chance {
         let resource = ResourceKind::ALL[rng.next_range(ResourceKind::ALL.len() as u32) as usize];
         let amount = 1 + rng.next_range(5);
         bus.emit(tick.0, EventPayload::Ingestion { resource, amount });
+    }
+}
+
+/// World phase: the weather generator (spec 006 section 5). One
+/// system at a time for the slice; onsets, targeted freezes, drone
+/// scrambles, and paired ends all travel as typed events.
+fn generate_weather(
+    tick: Res<SimTick>,
+    mut domain: ResMut<WorldDomain>,
+    mut rng: ResMut<SimRng>,
+    mut bus: ResMut<EventBus>,
+) {
+    let weather = &mut domain.weather;
+    if weather.storm_ticks == 0 && weather.flare_ticks == 0 {
+        if rng.next_f32() < STORM_CHANCE_PER_SECOND * TICK_SECONDS {
+            weather.storm_ticks = STORM_BASE_TICKS + rng.next_range(STORM_BASE_TICKS);
+            weather.storms_seen += 1;
+            bus.emit(tick.0, EventPayload::Weather(WeatherEvent::StormOnset));
+        } else if rng.next_f32() < FLARE_CHANCE_PER_SECOND * TICK_SECONDS {
+            weather.flare_ticks = FLARE_BASE_TICKS + rng.next_range(FLARE_BASE_TICKS);
+            weather.flares_seen += 1;
+            bus.emit(tick.0, EventPayload::Weather(WeatherEvent::SolarFlareOnset));
+        }
+        return;
+    }
+    if weather.storm_ticks > 0 {
+        weather.storm_ticks -= 1;
+        if rng.next_f32() < FREEZE_CHANCE_PER_SECOND * TICK_SECONDS {
+            let node = rng.next_range(HULL_NODES as u32);
+            let payload = if rng.next_f32() < 0.5 {
+                WeatherEvent::ValveFreeze { node }
+            } else {
+                WeatherEvent::SensorFreeze { node }
+            };
+            bus.emit(tick.0, EventPayload::Weather(payload));
+        }
+        if weather.storm_ticks == 0 {
+            bus.emit(tick.0, EventPayload::Weather(WeatherEvent::StormEnd));
+        }
+        return;
+    }
+    weather.flare_ticks -= 1;
+    if rng.next_f32() < SCRAMBLE_CHANCE_PER_SECOND * TICK_SECONDS {
+        bus.emit(tick.0, EventPayload::Weather(WeatherEvent::DroneScramble));
+    }
+    if weather.flare_ticks == 0 {
+        bus.emit(tick.0, EventPayload::Weather(WeatherEvent::SolarFlareEnd));
+    }
+}
+
+/// World phase: Iceberg Node expeditions (spec 006 section 4). Sites
+/// are sighted under way; anchoring at one deploys the rovers; the
+/// crush clock and the rover hauls both run until the anchor is
+/// released. Greed calibration is the player's call.
+fn run_expedition(
+    tick: Res<SimTick>,
+    helm: Res<Helm>,
+    kinetics: Res<ShipKinetics>,
+    mut domain: ResMut<WorldDomain>,
+    mut rng: ResMut<SimRng>,
+    mut bus: ResMut<EventBus>,
+) {
+    let expedition = &mut domain.expedition;
+    if !expedition.site_available && !expedition.anchored_at_site {
+        if kinetics.speed > 0.0 && rng.next_f32() < SITE_CHANCE_PER_SECOND * TICK_SECONDS {
+            expedition.site_available = true;
+        }
+        return;
+    }
+    if helm.anchor_ordered && expedition.site_available && !expedition.anchored_at_site {
+        expedition.anchored_at_site = true;
+        expedition.crush_pressure = 0.0;
+        expedition.crush_countdown = CRUSH_EVENT_TICKS;
+        expedition.haul_countdown = HAUL_TICKS;
+        bus.emit(tick.0, EventPayload::Expedition(ExpeditionEvent::AnchorSet));
+        return;
+    }
+    if !helm.anchor_ordered && expedition.anchored_at_site {
+        expedition.anchored_at_site = false;
+        expedition.site_available = false;
+        expedition.crush_pressure = 0.0;
+        bus.emit(
+            tick.0,
+            EventPayload::Expedition(ExpeditionEvent::RoverReturn),
+        );
+        return;
+    }
+    if !expedition.anchored_at_site {
+        return;
+    }
+    expedition.crush_pressure += CRUSH_RATE_PER_SECOND * TICK_SECONDS;
+    if rng.next_f32() < WARNING_CHANCE_PER_SECOND * TICK_SECONDS {
+        let magnitude = 0.2 + 0.8 * rng.next_f32();
+        bus.emit(
+            tick.0,
+            EventPayload::Expedition(ExpeditionEvent::IceShiftWarning { magnitude }),
+        );
+    }
+    expedition.crush_countdown -= 1;
+    if expedition.crush_countdown == 0 {
+        expedition.crush_countdown = CRUSH_EVENT_TICKS;
+        bus.emit(
+            tick.0,
+            EventPayload::Expedition(ExpeditionEvent::CrushProgress {
+                pressure: expedition.crush_pressure,
+            }),
+        );
+    }
+    expedition.haul_countdown -= 1;
+    if expedition.haul_countdown == 0 {
+        expedition.haul_countdown = HAUL_TICKS;
+        let tech = 1 + rng.next_range(3);
+        let scrap = 2 + rng.next_range(5);
+        bus.emit(
+            tick.0,
+            EventPayload::Ingestion {
+                resource: ResourceKind::AncientTech,
+                amount: tech,
+            },
+        );
+        bus.emit(
+            tick.0,
+            EventPayload::Ingestion {
+                resource: ResourceKind::FrozenScrap,
+                amount: scrap,
+            },
+        );
     }
 }
 
@@ -430,6 +621,8 @@ fn consume_events(
     mut bus: ResMut<EventBus>,
     mut hull: ResMut<HullGraph>,
     mut cargo: ResMut<CargoHold>,
+    mut equipment: ResMut<Equipment>,
+    mut fleet: ResMut<DroneFleet>,
 ) {
     while let Some(event) = bus.queue.pop() {
         match event.payload {
@@ -440,10 +633,51 @@ fn consume_events(
             EventPayload::Ingestion { resource, amount } => {
                 cargo.amounts[CargoHold::index(resource)] += u64::from(amount);
             }
-            // Families are defined (spec 011); their interior resolution
-            // arrives with the matching state domains of spec 010.
-            EventPayload::Weather(_) | EventPayload::Expedition(_) => {}
+            EventPayload::Weather(WeatherEvent::ValveFreeze { node }) => {
+                equipment.valve_frozen[node as usize % HULL_NODES] = THAW_TICKS;
+            }
+            EventPayload::Weather(WeatherEvent::SensorFreeze { node }) => {
+                equipment.sensor_frozen[node as usize % HULL_NODES] = THAW_TICKS;
+            }
+            EventPayload::Weather(WeatherEvent::DroneScramble) => {
+                fleet.scrambled_ticks = SCRAMBLE_TICKS;
+            }
+            // Onset and end pairs are presentation surface; the
+            // targeted freezes and scrambles above carry the
+            // mechanical consequences (spec 006 section 5).
+            EventPayload::Weather(
+                WeatherEvent::StormOnset
+                | WeatherEvent::StormEnd
+                | WeatherEvent::SolarFlareOnset
+                | WeatherEvent::SolarFlareEnd,
+            ) => {}
+            EventPayload::Expedition(ExpeditionEvent::CrushProgress { pressure }) => {
+                for stress in &mut hull.stress {
+                    *stress = (*stress + pressure * CRUSH_STRESS_SCALE).min(1.0);
+                }
+            }
+            // The warning is presentation surface; the crush events
+            // that follow carry the stress. Anchor set and rover
+            // return mark the expedition's edges (spec 006 section 4).
+            EventPayload::Expedition(
+                ExpeditionEvent::AnchorSet
+                | ExpeditionEvent::IceShiftWarning { .. }
+                | ExpeditionEvent::RoverReturn,
+            ) => {}
         }
+    }
+}
+
+/// Interior phase: frozen equipment counts down to thaw on its own
+/// (spec 006 section 5); the ManualThaw command is the fast path.
+fn thaw_equipment(mut equipment: ResMut<Equipment>) {
+    let equipment = &mut *equipment;
+    for ticks in equipment
+        .valve_frozen
+        .iter_mut()
+        .chain(equipment.sensor_frozen.iter_mut())
+    {
+        *ticks = ticks.saturating_sub(1);
     }
 }
 
@@ -585,6 +819,12 @@ fn run_drones(
     mut hull: ResMut<HullGraph>,
     mut cargo: ResMut<CargoHold>,
 ) {
+    if fleet.scrambled_ticks > 0 {
+        // Smart routing is down; belts elsewhere keep running (spec
+        // 006 section 5).
+        fleet.scrambled_ticks -= 1;
+        return;
+    }
     if !core.system_online(ShipSystem::DroneBays) {
         return;
     }
@@ -647,6 +887,7 @@ fn maintain_drones(
 fn read_back_capability(
     hull: Res<HullGraph>,
     core: Res<EngineCore>,
+    equipment: Res<Equipment>,
     mut capability: ResMut<Capability>,
 ) {
     let total: f32 = hull.stress.iter().sum();
@@ -658,10 +899,11 @@ fn read_back_capability(
         0.0
     };
     capability.sensor_coverage = if core.system_online(ShipSystem::Sensors) {
-        1.0
+        Equipment::working_fraction(&equipment.sensor_frozen)
     } else {
         0.0
     };
+    capability.intake_capacity = Equipment::working_fraction(&equipment.valve_frozen);
 }
 
 #[cfg(test)]
@@ -958,6 +1200,176 @@ mod tests {
             sim.world.resource::<EngineCore>().fuel_buffer < buffer_after_cut,
             "the core stopped burning from the buffer"
         );
+    }
+
+    /// Freeze events resolve into equipment state, degrade the intake
+    /// and sensor readback, and thaw on the tick countdown (spec 006
+    /// section 5).
+    #[test]
+    fn freezes_degrade_readback_and_thaw() {
+        let mut sim = SimWorld::new(41);
+        let tick = sim.world.resource::<SimTick>().0;
+        sim.world.resource_mut::<EventBus>().emit(
+            tick,
+            EventPayload::Weather(WeatherEvent::ValveFreeze { node: 2 }),
+        );
+        sim.world.resource_mut::<EventBus>().emit(
+            tick,
+            EventPayload::Weather(WeatherEvent::SensorFreeze { node: 3 }),
+        );
+        sim.tick();
+        let equipment = sim.world.resource::<Equipment>();
+        assert_eq!(equipment.valve_frozen[2], THAW_TICKS - 1);
+        assert_eq!(equipment.sensor_frozen[3], THAW_TICKS - 1);
+        let capability = sim.world.resource::<Capability>();
+        assert!(capability.intake_capacity < 1.0);
+        assert!(capability.sensor_coverage < 1.0);
+        for _ in 0..THAW_TICKS {
+            sim.tick();
+        }
+        let equipment = sim.world.resource::<Equipment>();
+        assert_eq!(equipment.valve_frozen[2], 0, "the valve never thawed");
+        assert_eq!(equipment.sensor_frozen[3], 0, "the sensor never thawed");
+    }
+
+    /// The emergency manual override thaws a node's equipment at once
+    /// (spec 006 section 5).
+    #[test]
+    fn manual_thaw_overrides_the_countdown() {
+        let mut sim = SimWorld::new(61);
+        let tick = sim.world.resource::<SimTick>().0;
+        sim.world.resource_mut::<EventBus>().emit(
+            tick,
+            EventPayload::Weather(WeatherEvent::ValveFreeze { node: 5 }),
+        );
+        sim.tick();
+        assert!(sim.world.resource::<Equipment>().valve_frozen[5] > 0);
+        sim.push_command(Command::ManualThaw { node: 5 });
+        sim.tick();
+        assert_eq!(sim.world.resource::<Equipment>().valve_frozen[5], 0);
+    }
+
+    /// A drone scramble suppresses fleet logic for its window while
+    /// the feed belt keeps running; repair resumes afterward (spec 006
+    /// section 5).
+    #[test]
+    fn scramble_stops_drones_but_not_belts() {
+        let mut sim = SimWorld::new(43);
+        sim.world.resource_mut::<HullGraph>().stress[1] = 0.9;
+        let tick = sim.world.resource::<SimTick>().0;
+        sim.world
+            .resource_mut::<EventBus>()
+            .emit(tick, EventPayload::Weather(WeatherEvent::DroneScramble));
+        let buffer_before = sim.world.resource::<EngineCore>().fuel_buffer;
+        for _ in 0..50 {
+            sim.tick();
+        }
+        assert_eq!(
+            sim.world.resource::<HullGraph>().stress[1],
+            0.9,
+            "a scrambled drone did repair work"
+        );
+        assert!(
+            sim.world.resource::<EngineCore>().fuel_buffer > buffer_before,
+            "the feed belt stopped during the scramble"
+        );
+        for _ in 0..SCRAMBLE_TICKS {
+            sim.tick();
+        }
+        assert!(
+            sim.world.resource::<HullGraph>().stress[1] < 0.9,
+            "repair never resumed after the scramble"
+        );
+    }
+
+    /// Crush pressure resolves as ambient stress across every hull
+    /// node (spec 006 section 4).
+    #[test]
+    fn crush_progress_stresses_every_node() {
+        let mut sim = SimWorld::new(47);
+        let tick = sim.world.resource::<SimTick>().0;
+        sim.world.resource_mut::<EventBus>().emit(
+            tick,
+            EventPayload::Expedition(ExpeditionEvent::CrushProgress { pressure: 1.0 }),
+        );
+        sim.tick();
+        for stress in &sim.world.resource::<HullGraph>().stress {
+            assert!(*stress > 0.0, "a node escaped the ambient crush");
+        }
+    }
+
+    /// The expedition lifecycle: sight a site under way, anchor,
+    /// accrue crush pressure and rover hauls, release, rovers return
+    /// and the site is spent (spec 006 section 4).
+    #[test]
+    fn expedition_lifecycle_flows() {
+        let mut sim = SimWorld::new(53);
+        sim.push_command(Command::SetThrottle { throttle: 1.0 });
+        let mut safety = 0;
+        while !sim
+            .world
+            .resource::<WorldDomain>()
+            .expedition
+            .site_available
+        {
+            sim.tick();
+            safety += 1;
+            assert!(safety < 6000, "no site sighted under way");
+        }
+        sim.push_command(Command::SetAnchor { anchored: true });
+        sim.tick();
+        sim.tick();
+        assert!(
+            sim.world
+                .resource::<WorldDomain>()
+                .expedition
+                .anchored_at_site
+        );
+        assert_eq!(
+            sim.world.resource::<ShipKinetics>().speed,
+            0.0,
+            "the anchored ship kept moving"
+        );
+        let tech_before = sim
+            .world
+            .resource::<CargoHold>()
+            .amount(ResourceKind::AncientTech);
+        for _ in 0..200 {
+            sim.tick();
+        }
+        assert!(
+            sim.world
+                .resource::<WorldDomain>()
+                .expedition
+                .crush_pressure
+                > 0.0
+        );
+        assert!(
+            sim.world
+                .resource::<CargoHold>()
+                .amount(ResourceKind::AncientTech)
+                > tech_before,
+            "no rover hauls landed"
+        );
+        sim.push_command(Command::SetAnchor { anchored: false });
+        sim.tick();
+        let domain = sim.world.resource::<WorldDomain>();
+        assert!(!domain.expedition.anchored_at_site);
+        assert!(!domain.expedition.site_available, "the site was not spent");
+        assert_eq!(domain.expedition.crush_pressure, 0.0);
+    }
+
+    /// Weather happens on its own: a long moving run sees at least one
+    /// super-storm (spec 006 section 5).
+    #[test]
+    fn storms_eventually_happen() {
+        let mut sim = SimWorld::new(59);
+        sim.push_command(Command::SetThrottle { throttle: 1.0 });
+        for _ in 0..6000 {
+            sim.tick();
+        }
+        let weather = &sim.world.resource::<WorldDomain>().weather;
+        assert!(weather.storms_seen > 0, "no storm in 6000 ticks");
     }
 
     /// An overheating core draws melted intake ice as coolant: the
