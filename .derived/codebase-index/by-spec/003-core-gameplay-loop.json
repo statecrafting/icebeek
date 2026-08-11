@@ -1,0 +1,33 @@
+{
+  "mapping": {
+    "dependsOn": [
+      "001-absolute-zero-vision",
+      "002-dual-view-architecture"
+    ],
+    "implementingPaths": [
+      {
+        "path": "docs/design/core-loop.md",
+        "source": "spec-edge"
+      }
+    ],
+    "resolvedUnits": [
+      {
+        "locations": [
+          {
+            "file": "docs/design/core-loop.md"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "file",
+          "path": "docs/design/core-loop.md"
+        }
+      }
+    ],
+    "specId": "003-core-gameplay-loop",
+    "specStatus": "approved"
+  },
+  "schemaVersion": "1.1.0",
+  "shardHash": "e27e67391d6e972771908ad594bcf0ce127998d254b31518e61595d537340f03"
+}

@@ -1,0 +1,33 @@
+{
+  "mapping": {
+    "dependsOn": [
+      "002-dual-view-architecture",
+      "003-core-gameplay-loop"
+    ],
+    "implementingPaths": [
+      {
+        "path": "docs/design/world.md",
+        "source": "spec-edge"
+      }
+    ],
+    "resolvedUnits": [
+      {
+        "locations": [
+          {
+            "file": "docs/design/world.md"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "file",
+          "path": "docs/design/world.md"
+        }
+      }
+    ],
+    "specId": "006-world-and-expeditions",
+    "specStatus": "approved"
+  },
+  "schemaVersion": "1.1.0",
+  "shardHash": "9e272ebd469c56f109230405ea71b237c39f2ec2232c7f3566f17094fd94c594"
+}

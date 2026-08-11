@@ -1,0 +1,24 @@
+# spec-spine.toml governs this repository. All keys are optional; an
+# absent file behaves as the defaults for a single-Cargo-workspace repo.
+# See the spec-spine docs for the full knob table.
+
+[manifest]
+# Drives the Cargo `[package.metadata.spec-spine].spec` and package.json `"spec-spine".spec` reads.
+metadata_namespace = "spec-spine"
+
+[domains]
+allowed = []   # empty ⇒ the `domain` field is free-text / disabled
+
+[kind]
+allowed = []   # empty ⇒ the `kind` field is free-text / disabled
+
+[layout]
+specs_dir     = "specs"
+derived_dir   = ".derived"
+standards_dir = "standards/spec"
+
+[coupling]
+# The PR-body waiver keyword (the reason follows the colon).
+waiver_keyword = "Spec-Drift-Waiver:"
+# Adopter bypass entries are ADDITIVE to the built-in generic floor.
+bypass_prefixes = []

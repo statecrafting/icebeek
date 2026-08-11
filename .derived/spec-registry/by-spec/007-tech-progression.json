@@ -1,0 +1,31 @@
+{
+  "record": {
+    "created": "2026-08-10",
+    "dependsOn": [
+      "004-ship-systems",
+      "005-automation-control-plane",
+      "006-world-and-expeditions"
+    ],
+    "establishes": [
+      {
+        "kind": "file",
+        "path": "docs/design/progression.md"
+      }
+    ],
+    "id": "007-tech-progression",
+    "sectionHeadings": [
+      "007: Tech tree and progression",
+      "1. Purpose",
+      "2. The paradigm rule",
+      "3. The tiers",
+      "4. Unlock sources",
+      "5. Out of scope"
+    ],
+    "specPath": "specs/007-tech-progression/spec.md",
+    "status": "approved",
+    "summary": "Progression is achieved by unlocking new architectural paradigms, not by incremental stat bumps. Tier 1, Mechanical Grinding: coal and wood-burning engines, manual routing, brute-force hull smashing. Tier 2, Chemical and Thermal: oil and methane processing, basic conveyor belts, thermal lances that melt ice before impact. Tier 3, Autonomous and Nuclear: nuclear reactors, complete logistics automation, localized AI control modules, sonic resonance ice-shattering. Each tier deliberately invalidates the previous tier's interior layout assumptions, making refactoring the ship the signature progression activity.\n",
+    "title": "Tech tree: three tiers of architectural paradigm"
+  },
+  "shardHash": "3a193784a580b4c7cdd706d287af5a4fe366aae57a222b252cc858ad8b582578",
+  "specVersion": "1.1.0"
+}

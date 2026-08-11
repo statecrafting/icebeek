@@ -1,0 +1,32 @@
+{
+  "mapping": {
+    "dependsOn": [
+      "004-ship-systems"
+    ],
+    "implementingPaths": [
+      {
+        "path": "docs/design/automation.md",
+        "source": "spec-edge"
+      }
+    ],
+    "resolvedUnits": [
+      {
+        "locations": [
+          {
+            "file": "docs/design/automation.md"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "file",
+          "path": "docs/design/automation.md"
+        }
+      }
+    ],
+    "specId": "005-automation-control-plane",
+    "specStatus": "approved"
+  },
+  "schemaVersion": "1.1.0",
+  "shardHash": "07554f900395a24a4cb646efc91ead6d99d2a446b05cfa318db35064c3a14941"
+}

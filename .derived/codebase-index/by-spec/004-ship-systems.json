@@ -1,0 +1,32 @@
+{
+  "mapping": {
+    "dependsOn": [
+      "003-core-gameplay-loop"
+    ],
+    "implementingPaths": [
+      {
+        "path": "docs/design/ship-systems.md",
+        "source": "spec-edge"
+      }
+    ],
+    "resolvedUnits": [
+      {
+        "locations": [
+          {
+            "file": "docs/design/ship-systems.md"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "file",
+          "path": "docs/design/ship-systems.md"
+        }
+      }
+    ],
+    "specId": "004-ship-systems",
+    "specStatus": "approved"
+  },
+  "schemaVersion": "1.1.0",
+  "shardHash": "3db89fdfce6c6afe4632ec6e9e43bd486d532292f46ded3d53d2cf63a34e3677"
+}
