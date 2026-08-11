@@ -84,13 +84,13 @@ review; approved specs are settled authority.
 | 13 | `012-renderers` | approved (2026-08-11) |
 | 14 | `013-ci` | approved (2026-08-11) |
 
-Next pending: the engine core and thermal field domains are live
-(shutdown ladder, coolant loop, the mass-torque-fuel chain). The
-remaining vertical-slice work, in order: the drones and automation
-rules domains of spec 010 §5 (grounded in spec 005 §2 and §3), then
-resolving the Weather and Expedition event families into interior
-state, then first visuals in the renderers. Each substantial chunk
-is its own PR through both gates.
+Next pending: the interior control plane is live: engine core,
+thermal field, drone fleet, and tier-1 automation rules (spec 010
+§5, specs 004 and 005). The remaining vertical-slice work, in
+order: resolve the Weather and Expedition event families into
+interior state (spec 006, the world domain), then first visuals in
+the renderers. Each substantial chunk is its own PR through both
+gates.
 
 ## Available Agents
 

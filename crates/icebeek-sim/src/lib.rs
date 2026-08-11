@@ -17,9 +17,10 @@ use serde::{Deserialize, Serialize};
 pub use icebeek_events as events;
 pub use rng::SimRng;
 pub use state::{
-    AMBIENT_C, COMPARTMENTS, Capability, CargoHold, Command, CommandQueue, EngineCore, EventBus,
-    HULL_NODES, Helm, HullGraph, OPERATING_C, SHUTDOWN_LADDER, ShipKinetics, ShipSystem, SimTick,
-    ThermalField,
+    AMBIENT_C, AutomationRule, AutomationRules, COMPARTMENTS, Capability, CargoHold, Command,
+    CommandQueue, Condition, Drone, DroneFleet, DroneKind, DroneZone, EngineCore, EventBus,
+    HULL_NODES, Helm, HullGraph, OPERATING_C, Routing, RuleAction, SHUTDOWN_LADDER, ShipKinetics,
+    ShipSystem, SimTick, ThermalField,
 };
 
 use icebeek_events::{EventPayload, ResourceKind};
@@ -36,8 +37,18 @@ const MAX_SPEED: f32 = 6.0;
 const IMPACT_CHANCE_PER_SECOND: f32 = 0.8;
 /// Per-second ingestion probability while moving.
 const INGEST_CHANCE_PER_SECOND: f32 = 2.0;
-/// Passive stress decay from the standing repair line, per second.
+/// Stress a repair drone at full uptime removes per second from the
+/// node it serves.
 const REPAIR_RATE_PER_SECOND: f32 = 0.05;
+/// Frozen scrap a working repair drone consumes per second as strut
+/// feedstock, metered in whole units.
+const STRUT_UNITS_PER_SECOND: f32 = 0.1;
+/// Wear a drone accrues per second of active work.
+const WEAR_PER_SECOND: f32 = 0.01;
+/// Wear level at which the bay pulls a drone in for maintenance.
+const MAINTENANCE_WEAR: f32 = 0.5;
+/// Frozen scrap one maintenance pass consumes.
+const MAINTENANCE_SCRAP_UNITS: u64 = 2;
 
 /// Unloaded hull mass, in mass units. Balancing placeholder, like the
 /// engine and thermal constants below (spec 010 section 10).
@@ -116,6 +127,9 @@ pub struct SaveState {
     pub hull: HullGraph,
     pub engine: EngineCore,
     pub thermal: ThermalField,
+    pub drones: DroneFleet,
+    pub rules: AutomationRules,
+    pub routing: Routing,
     pub cargo: CargoHold,
     pub capability: Capability,
     pub rng: SimRng,
@@ -168,6 +182,9 @@ impl SimWorld {
         world.insert_resource(HullGraph::default());
         world.insert_resource(EngineCore::default());
         world.insert_resource(ThermalField::default());
+        world.insert_resource(DroneFleet::default());
+        world.insert_resource(AutomationRules::default());
+        world.insert_resource(Routing::default());
         world.insert_resource(CargoHold::starting_provisions());
         world.insert_resource(Capability::default());
         world.insert_resource(SimRng::from_seed(seed));
@@ -185,13 +202,15 @@ impl SimWorld {
             interior_phase: phase_schedule(
                 (
                     mark_interior,
+                    evaluate_rules,
                     consume_events,
                     feed_engine,
                     burn_fuel,
                     route_coolant,
                     update_thermal_field,
                     advance_shutdown_ladder,
-                    run_repairs,
+                    run_drones,
+                    maintain_drones,
                 )
                     .chain(),
             ),
@@ -248,6 +267,9 @@ impl SimWorld {
             hull: self.world.resource::<HullGraph>().clone(),
             engine: self.world.resource::<EngineCore>().clone(),
             thermal: self.world.resource::<ThermalField>().clone(),
+            drones: self.world.resource::<DroneFleet>().clone(),
+            rules: self.world.resource::<AutomationRules>().clone(),
+            routing: self.world.resource::<Routing>().clone(),
             cargo: self.world.resource::<CargoHold>().clone(),
             capability: self.world.resource::<Capability>().clone(),
             rng: self.world.resource::<SimRng>().clone(),
@@ -270,6 +292,9 @@ impl SimWorld {
         world.insert_resource(save.hull);
         world.insert_resource(save.engine);
         world.insert_resource(save.thermal);
+        world.insert_resource(save.drones);
+        world.insert_resource(save.rules);
+        world.insert_resource(save.routing);
         world.insert_resource(save.cargo);
         world.insert_resource(save.capability);
         world.insert_resource(save.rng);
@@ -320,11 +345,36 @@ fn mark_readback(mut log: ResMut<PhaseLog>) {
 }
 
 /// Commands phase: apply queued player commands in push order.
-fn apply_commands(mut queue: ResMut<CommandQueue>, mut helm: ResMut<Helm>) {
+fn apply_commands(
+    mut queue: ResMut<CommandQueue>,
+    mut helm: ResMut<Helm>,
+    mut rules: ResMut<AutomationRules>,
+    mut fleet: ResMut<DroneFleet>,
+) {
     while let Some(command) = queue.pending.pop_front() {
         match command {
             Command::SetHeading { heading_rad } => helm.heading_rad = heading_rad,
             Command::SetThrottle { throttle } => helm.throttle = throttle.clamp(0.0, 1.0),
+            Command::AddRule { condition, action } => {
+                let id = rules.next_rule_id;
+                rules.next_rule_id += 1;
+                rules.rules.push(AutomationRule {
+                    id,
+                    condition,
+                    action,
+                });
+            }
+            Command::RemoveRule { id } => rules.rules.retain(|rule| rule.id != id),
+            Command::SetDroneZone { drone, zone } => {
+                if let Some(drone) = fleet.drones.get_mut(drone as usize) {
+                    let last = (HULL_NODES - 1) as u32;
+                    let from = zone.from.min(last);
+                    drone.zone = DroneZone {
+                        from,
+                        to: zone.to.clamp(from, last),
+                    };
+                }
+            }
         }
     }
 }
@@ -397,11 +447,44 @@ fn consume_events(
     }
 }
 
+/// Interior phase: tier-1 rule evaluation, first thing after the
+/// event queue snapshot of the world phase. Rules run in stored list
+/// order; later rules win conflicting writes (spec 010 section 5,
+/// spec 005 section 3).
+fn evaluate_rules(
+    rules: Res<AutomationRules>,
+    engine: Res<EngineCore>,
+    hull: Res<HullGraph>,
+    cargo: Res<CargoHold>,
+    mut routing: ResMut<Routing>,
+) {
+    for rule in &rules.rules {
+        let fired = match rule.condition {
+            Condition::Always => true,
+            Condition::FuelBufferBelow(level) => engine.fuel_buffer < level,
+            Condition::CoreTempAbove(level) => engine.temperature > level,
+            Condition::CoreTempBelow(level) => engine.temperature < level,
+            Condition::StockBelow { resource, amount } => cargo.amount(resource) < amount,
+            Condition::StressAbove { node, level } => {
+                hull.stress[node as usize % HULL_NODES] > level
+            }
+        };
+        if !fired {
+            continue;
+        }
+        match rule.action {
+            RuleAction::SetFeedEnabled(enabled) => routing.feed_enabled = enabled,
+            RuleAction::SetCoolantEnabled(enabled) => routing.coolant_enabled = enabled,
+        }
+    }
+}
+
 /// Interior phase: the feed line stages whole fuel units at the core
-/// while logistics is online and the buffer has room (spec 004
-/// section 3: a constant, uninterrupted supply is the requirement).
-fn feed_engine(mut core: ResMut<EngineCore>, mut cargo: ResMut<CargoHold>) {
-    if !core.system_online(ShipSystem::Logistics) {
+/// while logistics is online, the belt switch is set, and the buffer
+/// has room (spec 004 section 3: a constant, uninterrupted supply is
+/// the requirement).
+fn feed_engine(routing: Res<Routing>, mut core: ResMut<EngineCore>, mut cargo: ResMut<CargoHold>) {
+    if !routing.feed_enabled || !core.system_online(ShipSystem::Logistics) {
         return;
     }
     let biomass = CargoHold::index(ResourceKind::Biomass);
@@ -432,9 +515,16 @@ fn burn_fuel(kinetics: Res<ShipKinetics>, field: Res<ThermalField>, mut core: Re
 /// Interior phase: above the coolant threshold the loop melts intake
 /// ice to pull core heat down; spent stock leaves the hold in whole
 /// units via the coolant meter (spec 004 section 5).
-fn route_coolant(mut core: ResMut<EngineCore>, mut cargo: ResMut<CargoHold>) {
+fn route_coolant(
+    routing: Res<Routing>,
+    mut core: ResMut<EngineCore>,
+    mut cargo: ResMut<CargoHold>,
+) {
     let ice = CargoHold::index(ResourceKind::Ice);
-    if core.temperature <= COOLANT_THRESHOLD_C || cargo.amounts[ice] == 0 {
+    if !routing.coolant_enabled
+        || core.temperature <= COOLANT_THRESHOLD_C
+        || cargo.amounts[ice] == 0
+    {
         return;
     }
     let melted = COOLANT_UNITS_PER_SECOND * TICK_SECONDS;
@@ -484,15 +574,71 @@ fn advance_shutdown_ladder(mut core: ResMut<EngineCore>) {
     }
 }
 
-/// Interior phase: the standing repair line decays stress (spec 005
-/// section 4, minimal placeholder). Repair is drone work: it stops
-/// while the ladder has the drone bays down.
-fn run_repairs(core: Res<EngineCore>, mut hull: ResMut<HullGraph>) {
+/// Interior phase: the standing repair line is drone work (spec 005
+/// sections 2 and 4). Each repair drone, in spawn order, serves the
+/// most stressed node in its zone (ties to the lowest index), drawing
+/// strut feedstock from the hold and accruing wear. Drones idle while
+/// the ladder has the drone bays down.
+fn run_drones(
+    core: Res<EngineCore>,
+    mut fleet: ResMut<DroneFleet>,
+    mut hull: ResMut<HullGraph>,
+    mut cargo: ResMut<CargoHold>,
+) {
     if !core.system_online(ShipSystem::DroneBays) {
         return;
     }
-    for stress in &mut hull.stress {
-        *stress = (*stress - REPAIR_RATE_PER_SECOND * TICK_SECONDS).max(0.0);
+    let scrap = CargoHold::index(ResourceKind::FrozenScrap);
+    for drone in &mut fleet.drones {
+        if drone.kind != DroneKind::Repair || cargo.amounts[scrap] == 0 {
+            continue;
+        }
+        let mut target: Option<usize> = None;
+        for node in drone.zone.from..=drone.zone.to {
+            let node = node as usize;
+            if node >= HULL_NODES || hull.stress[node] <= 0.0 {
+                continue;
+            }
+            let better = match target {
+                None => true,
+                Some(current) => hull.stress[node] > hull.stress[current],
+            };
+            if better {
+                target = Some(node);
+            }
+        }
+        let Some(node) = target else {
+            continue;
+        };
+        let uptime = drone.uptime();
+        let repaired = REPAIR_RATE_PER_SECOND * uptime * TICK_SECONDS;
+        hull.stress[node] = (hull.stress[node] - repaired).max(0.0);
+        drone.wear = (drone.wear + WEAR_PER_SECOND * TICK_SECONDS).min(1.0);
+        drone.strut_meter += STRUT_UNITS_PER_SECOND * uptime * TICK_SECONDS;
+        if drone.strut_meter >= 1.0 {
+            drone.strut_meter -= 1.0;
+            cargo.amounts[scrap] -= 1;
+        }
+    }
+}
+
+/// Interior phase: the bay pulls worn drones in, spending scrap in
+/// whole units to reset wear (spec 005 section 2: maintenance cost is
+/// the price of uptime).
+fn maintain_drones(
+    core: Res<EngineCore>,
+    mut fleet: ResMut<DroneFleet>,
+    mut cargo: ResMut<CargoHold>,
+) {
+    if !core.system_online(ShipSystem::DroneBays) {
+        return;
+    }
+    let scrap = CargoHold::index(ResourceKind::FrozenScrap);
+    for drone in &mut fleet.drones {
+        if drone.wear >= MAINTENANCE_WEAR && cargo.amounts[scrap] >= MAINTENANCE_SCRAP_UNITS {
+            cargo.amounts[scrap] -= MAINTENANCE_SCRAP_UNITS;
+            drone.wear = 0.0;
+        }
     }
 }
 
@@ -717,6 +863,101 @@ mod tests {
             assert!(a < b, "a compartment failed to cool");
             assert!(*a >= AMBIENT_C, "a compartment overshot ambient");
         }
+    }
+
+    /// Repair drones serve the most stressed node inside their own
+    /// zone and consume strut feedstock; nodes no drone patrols stay
+    /// stressed (spec 005 section 2).
+    #[test]
+    fn drones_repair_only_their_zones() {
+        let mut sim = SimWorld::new(23);
+        // Shrink both zones onto nodes 0..=3, leaving node 6 orphaned.
+        sim.push_command(Command::SetDroneZone {
+            drone: 1,
+            zone: DroneZone { from: 2, to: 3 },
+        });
+        sim.world.resource_mut::<HullGraph>().stress[1] = 0.8;
+        sim.world.resource_mut::<HullGraph>().stress[6] = 0.8;
+        let scrap = CargoHold::index(ResourceKind::FrozenScrap);
+        let scrap_before = sim.world.resource::<CargoHold>().amounts[scrap];
+        for _ in 0..300 {
+            sim.tick();
+        }
+        let hull = sim.world.resource::<HullGraph>();
+        assert!(hull.stress[1] < 0.8, "patrolled node was not repaired");
+        assert_eq!(hull.stress[6], 0.8, "an orphaned node was repaired");
+        let scrap_after = sim.world.resource::<CargoHold>().amounts[scrap];
+        assert!(scrap_after < scrap_before, "repair drew no strut feedstock");
+    }
+
+    /// Worn drones get pulled in by the bay: wear resets and scrap is
+    /// spent in whole units (spec 005 section 2).
+    #[test]
+    fn maintenance_resets_wear_for_scrap() {
+        let mut sim = SimWorld::new(29);
+        sim.world.resource_mut::<DroneFleet>().drones[0].wear = MAINTENANCE_WEAR + 0.1;
+        let scrap = CargoHold::index(ResourceKind::FrozenScrap);
+        let scrap_before = sim.world.resource::<CargoHold>().amounts[scrap];
+        sim.tick();
+        let fleet = sim.world.resource::<DroneFleet>();
+        assert_eq!(fleet.drones[0].wear, 0.0, "maintenance never ran");
+        let scrap_after = sim.world.resource::<CargoHold>().amounts[scrap];
+        assert_eq!(scrap_after, scrap_before - MAINTENANCE_SCRAP_UNITS);
+    }
+
+    /// Rules evaluate in stored order and later rules win conflicting
+    /// writes; removing the later rule hands the switch back (spec 010
+    /// section 5, spec 005 section 3).
+    #[test]
+    fn rules_evaluate_in_stable_order() {
+        let mut sim = SimWorld::new(31);
+        sim.push_command(Command::AddRule {
+            condition: Condition::Always,
+            action: RuleAction::SetCoolantEnabled(false),
+        });
+        sim.push_command(Command::AddRule {
+            condition: Condition::Always,
+            action: RuleAction::SetCoolantEnabled(true),
+        });
+        sim.tick();
+        assert!(
+            sim.world.resource::<Routing>().coolant_enabled,
+            "the later rule should win the conflicting write"
+        );
+        // Rule ids are assigned in push order: the later rule is id 1.
+        sim.push_command(Command::RemoveRule { id: 1 });
+        sim.tick();
+        assert!(
+            !sim.world.resource::<Routing>().coolant_enabled,
+            "with the later rule removed, the earlier one should hold"
+        );
+    }
+
+    /// A threshold gate actually routes: cutting the feed line drains
+    /// the buffer and leaves the hold untouched (spec 005 section 3).
+    #[test]
+    fn a_rule_gates_the_feed_line() {
+        let mut sim = SimWorld::new(37);
+        sim.push_command(Command::AddRule {
+            condition: Condition::Always,
+            action: RuleAction::SetFeedEnabled(false),
+        });
+        let biomass = CargoHold::index(ResourceKind::Biomass);
+        sim.tick();
+        let stock_after_cut = sim.world.resource::<CargoHold>().amounts[biomass];
+        let buffer_after_cut = sim.world.resource::<EngineCore>().fuel_buffer;
+        for _ in 0..100 {
+            sim.tick();
+        }
+        assert_eq!(
+            sim.world.resource::<CargoHold>().amounts[biomass],
+            stock_after_cut,
+            "the cut feed line still drew from the hold"
+        );
+        assert!(
+            sim.world.resource::<EngineCore>().fuel_buffer < buffer_after_cut,
+            "the core stopped burning from the buffer"
+        );
     }
 
     /// An overheating core draws melted intake ice as coolant: the
