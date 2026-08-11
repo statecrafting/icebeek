@@ -34,6 +34,9 @@ pub struct Helm {
     pub heading_rad: f32,
     /// Ordered throttle in [0, 1]; actual speed is capped by capability.
     pub throttle: f32,
+    /// Anchor order: while set, forward motion stops (spec 006
+    /// section 4: anchoring trades motion for extraction time).
+    pub anchor_ordered: bool,
 }
 
 /// Ship kinetics domain (specs 003 section 2, 005 section 5). Total
@@ -202,6 +205,9 @@ impl Drone {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Resource)]
 pub struct DroneFleet {
     pub drones: Vec<Drone>,
+    /// Ticks of solar-flare scramble left; the whole fleet's logic is
+    /// suppressed while nonzero (spec 006 section 5).
+    pub scrambled_ticks: u32,
 }
 
 impl Default for DroneFleet {
@@ -225,8 +231,75 @@ impl Default for DroneFleet {
                     strut_meter: 0.0,
                 },
             ],
+            scrambled_ticks: 0,
         }
     }
+}
+
+/// The first slice of the interior grid domain (spec 004 section 4):
+/// fixed intake valves and external sensors at hull nodes. Rooms and
+/// the logistics spine arrive with the buildable grid. A nonzero entry
+/// is a frozen unit counting down to thaw (spec 006 section 5).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Resource)]
+pub struct Equipment {
+    pub valve_frozen: [u32; HULL_NODES],
+    pub sensor_frozen: [u32; HULL_NODES],
+}
+
+impl Default for Equipment {
+    fn default() -> Self {
+        Self {
+            valve_frozen: [0; HULL_NODES],
+            sensor_frozen: [0; HULL_NODES],
+        }
+    }
+}
+
+impl Equipment {
+    /// Fraction of units in the given bank that are not frozen.
+    pub fn working_fraction(bank: &[u32; HULL_NODES]) -> f32 {
+        let working = bank.iter().filter(|ticks| **ticks == 0).count();
+        working as f32 / HULL_NODES as f32
+    }
+}
+
+/// Weather machine state, world side (spec 006 section 5). One system
+/// at a time for the vertical slice.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct WeatherState {
+    /// Ticks of super-storm remaining; 0 is clear.
+    pub storm_ticks: u32,
+    /// Ticks of solar flare remaining; 0 is clear.
+    pub flare_ticks: u32,
+    /// Storms seen this run (diagnostic surface for tests and views).
+    pub storms_seen: u32,
+    /// Flares seen this run.
+    pub flares_seen: u32,
+}
+
+/// Expedition machine state, world side (spec 006 section 4).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ExpeditionState {
+    /// An Iceberg Node is alongside and can be anchored to.
+    pub site_available: bool,
+    /// The ship is anchored at the site with rovers deployed.
+    pub anchored_at_site: bool,
+    /// Shifting-ice crush pressure while anchored, in [0, 1] and up.
+    pub crush_pressure: f32,
+    /// Ticks until the next CrushProgress emission while anchored.
+    pub crush_countdown: u32,
+    /// Ticks until the next rover haul while anchored.
+    pub haul_countdown: u32,
+}
+
+/// World domain (spec 010 section 5, spec 006): the exterior event
+/// generator's state. The map, Fog of Winter, and ice field arrive
+/// with the exterior content slice; this slice carries weather and
+/// expeditions.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Resource)]
+pub struct WorldDomain {
+    pub weather: WeatherState,
+    pub expedition: ExpeditionState,
 }
 
 /// What a tier-1 rule can test (spec 005 section 3: levels,
@@ -317,8 +390,11 @@ pub struct Capability {
     /// and zeroed while the shutdown ladder has propulsion down.
     pub available_thrust: f32,
     /// Fraction of nominal sensor coverage, zeroed while the shutdown
-    /// ladder has sensors down.
+    /// ladder has sensors down and degraded by frozen sensors.
     pub sensor_coverage: f32,
+    /// Fraction of intake valves working; scales intake yield in the
+    /// next tick's world phase (spec 006 section 5).
+    pub intake_capacity: f32,
 }
 
 impl Default for Capability {
@@ -326,6 +402,7 @@ impl Default for Capability {
         Self {
             available_thrust: 1.0,
             sensor_coverage: 1.0,
+            intake_capacity: 1.0,
         }
     }
 }
@@ -371,6 +448,15 @@ pub enum Command {
     SetDroneZone {
         drone: u32,
         zone: DroneZone,
+    },
+    /// Order or release the anchor (spec 006 section 4).
+    SetAnchor {
+        anchored: bool,
+    },
+    /// Emergency manual override: thaw the frozen valve and sensor at
+    /// a node immediately (spec 006 section 5).
+    ManualThaw {
+        node: u32,
     },
 }
 
