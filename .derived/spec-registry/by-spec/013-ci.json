@@ -1,0 +1,32 @@
+{
+  "record": {
+    "created": "2026-08-11",
+    "dependsOn": [
+      "009-cargo-workspace",
+      "010-simulation-core",
+      "012-renderers"
+    ],
+    "establishes": [
+      {
+        "kind": "file",
+        "path": "docs/design/ci.md"
+      }
+    ],
+    "id": "013-ci",
+    "sectionHeadings": [
+      "013: Rust CI",
+      "1. Purpose",
+      "2. The workflow",
+      "3. Toolchain and caching",
+      "4. Landing rule",
+      "5. Both gates, disjoint jobs",
+      "6. Out of scope"
+    ],
+    "specPath": "specs/013-ci/spec.md",
+    "status": "approved",
+    "summary": "The contract for the Rust CI workflow at .github/workflows/rust.yml, which runs beside the existing governance gate (spec 000's spec-spine.yml) on every pull request. It pins the four checks (cargo fmt --check, clippy over the whole workspace with warnings denied, the headless workspace test suite, and a workspace build), the toolchain source (rust-toolchain.toml, no version matrix), mandatory dependency caching, and the landing rule: the workflow file lands in the same PR that creates the Cargo workspace root, so Rust code is gated from its first commit. The strictness that spec 009 kept out of the crates (warnings deny) lives in the clippy invocation here, and the determinism replay test of spec 010 runs on every PR, making a determinism regression a red build. The workflow file edge is added when the file lands; until then this spec owns its design brief.\n",
+    "title": "Rust CI: the workspace gate beside the governance gate"
+  },
+  "shardHash": "643bfbf57d81b062b3381756ad51589762141a3ae1cc23f423f9ce2bd0302e6b",
+  "specVersion": "1.1.0"
+}

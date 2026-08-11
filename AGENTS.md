@@ -82,10 +82,14 @@ review; approved specs are settled authority.
 | 11 | `010-simulation-core` | approved (2026-08-11) |
 | 12 | `011-event-bus` | approved (2026-08-11) |
 | 13 | `012-renderers` | approved (2026-08-11) |
+| 14 | `013-ci` | approved (2026-08-11) |
 
-Next pending: author the last implementation spec on the Bevy
-decision (013: CI), a human checkpoint before its code lands
-(orchestrator rule: stop at human checkpoints).
+Next pending: the corpus through 013 is approved; the next work is
+the first implementation PR, bootstrapping the Cargo workspace per
+specs 009 through 013 (root manifests, the five crates, rust.yml)
+and adding the establishes edges those specs deferred. Human
+checkpoint before that code lands (orchestrator rule: stop at human
+checkpoints).
 
 ## Available Agents
 
