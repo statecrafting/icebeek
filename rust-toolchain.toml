@@ -1,0 +1,5 @@
+# Spec: 009-cargo-workspace
+# Pinned stable release, bumped deliberately by commit (spec 009 section 4).
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]

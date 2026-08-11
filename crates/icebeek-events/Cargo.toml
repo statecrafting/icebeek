@@ -1,0 +1,14 @@
+[package]
+name = "icebeek-events"
+version.workspace = true
+edition.workspace = true
+description = "Typed exterior-traffic vocabulary: the event envelope, families, and queue"
+
+[package.metadata.spec-spine]
+spec = "011-event-bus"
+
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

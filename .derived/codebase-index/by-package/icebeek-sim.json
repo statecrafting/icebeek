@@ -1,0 +1,10 @@
+{
+  "package": {
+    "kind": "rust-lib",
+    "name": "icebeek-sim",
+    "path": "crates/icebeek-sim",
+    "specRef": "010-simulation-core"
+  },
+  "schemaVersion": "1.1.0",
+  "shardHash": "286c19ce4c20176503c08ebfbc3f155354c91888a470f4b5a1a1a948203c1ff7"
+}

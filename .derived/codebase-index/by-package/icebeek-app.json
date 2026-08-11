@@ -1,0 +1,10 @@
+{
+  "package": {
+    "kind": "rust-bin",
+    "name": "icebeek-app",
+    "path": "crates/icebeek-app",
+    "specRef": "012-renderers"
+  },
+  "schemaVersion": "1.1.0",
+  "shardHash": "88e9d1c59417db6216aa4314fb9e06ca0e3252e10a06d4548021d20d9d57bc0d"
+}

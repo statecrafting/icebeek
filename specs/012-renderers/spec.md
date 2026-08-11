@@ -11,6 +11,9 @@ depends_on:
   - "011-event-bus"
 establishes:
   - "docs/design/renderers.md"
+  - { kind: directory, path: "crates/icebeek-render-exterior/" }
+  - { kind: directory, path: "crates/icebeek-render-interior/" }
+  - { kind: directory, path: "crates/icebeek-app/" }
 summary: >
   The contract for the presentation layer: crates/icebeek-render-exterior
   (the Macro, isometric 3D), crates/icebeek-render-interior (the Micro,

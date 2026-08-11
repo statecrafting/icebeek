@@ -1,0 +1,10 @@
+{
+  "package": {
+    "kind": "rust-lib",
+    "name": "icebeek-events",
+    "path": "crates/icebeek-events",
+    "specRef": "011-event-bus"
+  },
+  "schemaVersion": "1.1.0",
+  "shardHash": "1b0aebd05e1fc1b8fd004783ff828bb2fa038001e50c27f61be9c63c16e6f96b"
+}

@@ -10,6 +10,7 @@ depends_on:
   - "010-simulation-core"
 establishes:
   - "docs/design/event-bus.md"
+  - { kind: directory, path: "crates/icebeek-events/" }
 summary: >
   The contract for crates/icebeek-events, the engine-free vocabulary
   crate for the spec 002 coupling contract. It defines the event

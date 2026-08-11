@@ -9,6 +9,7 @@ depends_on:
   - "012-renderers"
 establishes:
   - "docs/design/ci.md"
+  - ".github/workflows/rust.yml"
 summary: >
   The contract for the Rust CI workflow at .github/workflows/rust.yml,
   which runs beside the existing governance gate (spec 000's

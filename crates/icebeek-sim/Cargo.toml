@@ -1,0 +1,15 @@
+[package]
+name = "icebeek-sim"
+version.workspace = true
+edition.workspace = true
+description = "Deterministic fixed-tick simulation core: the one crate of truth"
+
+[package.metadata.spec-spine]
+spec = "010-simulation-core"
+
+# bevy_ecs alone; the bevy umbrella is forbidden here (spec 010 section 2).
+[dependencies]
+bevy_ecs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+icebeek-events = { workspace = true }

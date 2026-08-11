@@ -7,6 +7,8 @@ depends_on:
   - "008-simulation-substrate"
 establishes:
   - "docs/design/workspace-layout.md"
+  - "Cargo.toml"
+  - "rust-toolchain.toml"
 summary: >
   The first code-facing spec. It fixes the Cargo workspace shape that
   the Bevy decision (spec 008) implies: a virtual workspace root, five
