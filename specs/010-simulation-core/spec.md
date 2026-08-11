@@ -125,6 +125,22 @@ design spec:
 The table pins the domain list, not field-level schemas; shapes are
 implementation latitude inside the crate. Renderers own none of it.
 
+Two engine-and-heat mechanisms are determinism surface rather than
+field latitude, so they are pinned here:
+
+- **Shutdown ladder.** The engine core's cold-shutdown sequence
+  (spec 004 §3) is a total order over dependent systems, farthest
+  from the core first, propulsion always last; recovery retraces the
+  same ladder in reverse. Ladder movement is tick-counted with
+  hysteresis between a stall threshold and a restart threshold; wall
+  time never participates.
+- **Thermal relaxation.** The thermal field updates by reading the
+  previous tick's temperatures and writing the next (double
+  buffered), so compartment iteration order cannot leak into state.
+  For the vertical slice the compartment set aligns one-to-one with
+  hull-graph nodes; the real room graph arrives with the interior
+  grid domain.
+
 ## 6. Write paths
 
 - **Typed player commands are the only outside write path**: course

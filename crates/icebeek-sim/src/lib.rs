@@ -17,8 +17,9 @@ use serde::{Deserialize, Serialize};
 pub use icebeek_events as events;
 pub use rng::SimRng;
 pub use state::{
-    Capability, CargoHold, Command, CommandQueue, EventBus, HULL_NODES, Helm, HullGraph,
-    ShipKinetics, SimTick,
+    AMBIENT_C, COMPARTMENTS, Capability, CargoHold, Command, CommandQueue, EngineCore, EventBus,
+    HULL_NODES, Helm, HullGraph, OPERATING_C, SHUTDOWN_LADDER, ShipKinetics, ShipSystem, SimTick,
+    ThermalField,
 };
 
 use icebeek_events::{EventPayload, ResourceKind};
@@ -37,6 +38,47 @@ const IMPACT_CHANCE_PER_SECOND: f32 = 0.8;
 const INGEST_CHANCE_PER_SECOND: f32 = 2.0;
 /// Passive stress decay from the standing repair line, per second.
 const REPAIR_RATE_PER_SECOND: f32 = 0.05;
+
+/// Unloaded hull mass, in mass units. Balancing placeholder, like the
+/// engine and thermal constants below (spec 010 section 10).
+const BASE_MASS: f32 = 1000.0;
+/// Mass of one cargo unit of any resource, in mass units.
+const CARGO_UNIT_MASS: f32 = 1.0;
+/// Fuel demand at zero torque, in fuel units per second: the burn that
+/// keeps the core warm while the ship idles.
+const IDLE_BURN_PER_SECOND: f32 = 0.15;
+/// Additional fuel demand per unit of normalized torque, per second.
+const TORQUE_BURN_PER_SECOND: f32 = 0.35;
+/// Fuel units the core-side buffer holds.
+const FUEL_BUFFER_CAP: f32 = 10.0;
+/// Whole cargo units the feed line moves to the buffer per tick while
+/// logistics is online and the buffer has room.
+const FEED_UNITS_PER_TICK: u64 = 1;
+/// Core heating per fuel unit burned, in degrees C.
+const HEAT_PER_FUEL: f32 = 12.0;
+/// Fractional leak of core heat toward its compartment, per second.
+const CORE_LEAK_PER_SECOND: f32 = 0.05;
+/// Core temperature below which the shutdown ladder advances.
+const STALL_C: f32 = 40.0;
+/// Core temperature above which the ladder retraces. The gap against
+/// STALL_C is hysteresis: between them the ladder holds.
+const RESTART_C: f32 = 60.0;
+/// Ticks between ladder movements while past a threshold.
+const LADDER_TICKS: u32 = 40;
+/// Core temperature above which the coolant loop draws intake ice.
+const COOLANT_THRESHOLD_C: f32 = 110.0;
+/// Ice units the coolant loop melts per second while active.
+const COOLANT_UNITS_PER_SECOND: f32 = 0.5;
+/// Core cooling per melted ice unit, in degrees C.
+const COOLING_PER_ICE: f32 = 30.0;
+/// Compartment-to-compartment diffusion rate, per second.
+const DIFFUSION_PER_SECOND: f32 = 0.4;
+/// Compartment leak toward the ambient exterior, per second.
+const HULL_LEAK_PER_SECOND: f32 = 0.02;
+/// Core-to-compartment thermal coupling, per second.
+const CORE_COUPLING_PER_SECOND: f32 = 0.1;
+/// Compartment hosting the engine core.
+const CORE_COMPARTMENT: usize = 0;
 
 /// The four phases of a tick, in their fixed total order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +114,8 @@ pub struct SaveState {
     pub helm: Helm,
     pub kinetics: ShipKinetics,
     pub hull: HullGraph,
+    pub engine: EngineCore,
+    pub thermal: ThermalField,
     pub cargo: CargoHold,
     pub capability: Capability,
     pub rng: SimRng,
@@ -122,7 +166,9 @@ impl SimWorld {
         world.insert_resource(Helm::default());
         world.insert_resource(ShipKinetics::default());
         world.insert_resource(HullGraph::default());
-        world.insert_resource(CargoHold::default());
+        world.insert_resource(EngineCore::default());
+        world.insert_resource(ThermalField::default());
+        world.insert_resource(CargoHold::starting_provisions());
         world.insert_resource(Capability::default());
         world.insert_resource(SimRng::from_seed(seed));
         world.insert_resource(EventBus::default());
@@ -136,7 +182,19 @@ impl SimWorld {
             world,
             commands_phase: phase_schedule((mark_commands, apply_commands).chain()),
             world_phase: phase_schedule((mark_world, drive_kinetics, generate_ice_events).chain()),
-            interior_phase: phase_schedule((mark_interior, consume_events, run_repairs).chain()),
+            interior_phase: phase_schedule(
+                (
+                    mark_interior,
+                    consume_events,
+                    feed_engine,
+                    burn_fuel,
+                    route_coolant,
+                    update_thermal_field,
+                    advance_shutdown_ladder,
+                    run_repairs,
+                )
+                    .chain(),
+            ),
             readback_phase: phase_schedule((mark_readback, read_back_capability).chain()),
             last_trace: TickTrace::default(),
         }
@@ -188,6 +246,8 @@ impl SimWorld {
             helm: self.world.resource::<Helm>().clone(),
             kinetics: self.world.resource::<ShipKinetics>().clone(),
             hull: self.world.resource::<HullGraph>().clone(),
+            engine: self.world.resource::<EngineCore>().clone(),
+            thermal: self.world.resource::<ThermalField>().clone(),
             cargo: self.world.resource::<CargoHold>().clone(),
             capability: self.world.resource::<Capability>().clone(),
             rng: self.world.resource::<SimRng>().clone(),
@@ -208,6 +268,8 @@ impl SimWorld {
         world.insert_resource(save.helm);
         world.insert_resource(save.kinetics);
         world.insert_resource(save.hull);
+        world.insert_resource(save.engine);
+        world.insert_resource(save.thermal);
         world.insert_resource(save.cargo);
         world.insert_resource(save.capability);
         world.insert_resource(save.rng);
@@ -268,14 +330,21 @@ fn apply_commands(mut queue: ResMut<CommandQueue>, mut helm: ResMut<Helm>) {
 }
 
 /// World phase: gross motion, capped by the capability the interior
-/// reported last tick (spec 002 section 3 rule 3).
+/// reported last tick (spec 002 section 3 rule 3). Mass sets torque,
+/// torque sets fuel demand (spec 005 section 5); the interior burns
+/// against that demand in the same tick.
 fn drive_kinetics(
     mut kinetics: ResMut<ShipKinetics>,
     helm: Res<Helm>,
     capability: Res<Capability>,
+    cargo: Res<CargoHold>,
 ) {
     let speed = helm.throttle.min(capability.available_thrust) * MAX_SPEED;
     kinetics.speed = speed;
+    let cargo_units: u64 = cargo.amounts.iter().sum();
+    kinetics.total_mass = BASE_MASS + cargo_units as f32 * CARGO_UNIT_MASS;
+    kinetics.torque_demand = kinetics.total_mass * speed / (BASE_MASS * MAX_SPEED);
+    kinetics.fuel_burn = IDLE_BURN_PER_SECOND + TORQUE_BURN_PER_SECOND * kinetics.torque_demand;
     let step = f64::from(speed) * f64::from(TICK_SECONDS);
     kinetics.position[0] += f64::from(helm.heading_rad.cos()) * step;
     kinetics.position[1] += f64::from(helm.heading_rad.sin()) * step;
@@ -328,9 +397,100 @@ fn consume_events(
     }
 }
 
+/// Interior phase: the feed line stages whole fuel units at the core
+/// while logistics is online and the buffer has room (spec 004
+/// section 3: a constant, uninterrupted supply is the requirement).
+fn feed_engine(mut core: ResMut<EngineCore>, mut cargo: ResMut<CargoHold>) {
+    if !core.system_online(ShipSystem::Logistics) {
+        return;
+    }
+    let biomass = CargoHold::index(ResourceKind::Biomass);
+    let mut moved = 0;
+    while moved < FEED_UNITS_PER_TICK
+        && cargo.amounts[biomass] > 0
+        && core.fuel_buffer <= FUEL_BUFFER_CAP - 1.0
+    {
+        cargo.amounts[biomass] -= 1;
+        core.fuel_buffer += 1.0;
+        moved += 1;
+    }
+}
+
+/// Interior phase: the core burns against the torque-driven demand the
+/// world phase computed this tick, heating itself and leaking heat
+/// into its compartment (spec 004 section 3).
+fn burn_fuel(kinetics: Res<ShipKinetics>, field: Res<ThermalField>, mut core: ResMut<EngineCore>) {
+    let demand = kinetics.fuel_burn * TICK_SECONDS;
+    let burned = demand.min(core.fuel_buffer);
+    core.fuel_buffer -= burned;
+    let heat = burned * HEAT_PER_FUEL;
+    let leak =
+        CORE_LEAK_PER_SECOND * (core.temperature - field.temps[CORE_COMPARTMENT]) * TICK_SECONDS;
+    core.temperature += heat - leak;
+}
+
+/// Interior phase: above the coolant threshold the loop melts intake
+/// ice to pull core heat down; spent stock leaves the hold in whole
+/// units via the coolant meter (spec 004 section 5).
+fn route_coolant(mut core: ResMut<EngineCore>, mut cargo: ResMut<CargoHold>) {
+    let ice = CargoHold::index(ResourceKind::Ice);
+    if core.temperature <= COOLANT_THRESHOLD_C || cargo.amounts[ice] == 0 {
+        return;
+    }
+    let melted = COOLANT_UNITS_PER_SECOND * TICK_SECONDS;
+    core.coolant_meter += melted;
+    core.temperature -= melted * COOLING_PER_ICE;
+    if core.coolant_meter >= 1.0 {
+        core.coolant_meter -= 1.0;
+        cargo.amounts[ice] -= 1;
+    }
+}
+
+/// Interior phase: thermal relaxation over the compartment ring,
+/// double buffered so iteration order cannot leak into state (spec 010
+/// section 5). Cold is the default (spec 004 section 5).
+fn update_thermal_field(core: Res<EngineCore>, mut field: ResMut<ThermalField>) {
+    let old = field.temps;
+    for (i, temp) in field.temps.iter_mut().enumerate() {
+        let left = old[(i + COMPARTMENTS - 1) % COMPARTMENTS];
+        let right = old[(i + 1) % COMPARTMENTS];
+        let mut delta = DIFFUSION_PER_SECOND * (left + right - 2.0 * old[i])
+            + HULL_LEAK_PER_SECOND * (AMBIENT_C - old[i]);
+        if i == CORE_COMPARTMENT {
+            delta += CORE_COUPLING_PER_SECOND * (core.temperature - old[i]);
+        }
+        *temp = old[i] + delta * TICK_SECONDS;
+    }
+}
+
+/// Interior phase: tick-counted ladder movement with hysteresis
+/// between the stall and restart thresholds (spec 010 section 5).
+fn advance_shutdown_ladder(mut core: ResMut<EngineCore>) {
+    let at_bottom = usize::from(core.shutdown_stage) >= SHUTDOWN_LADDER.len();
+    if core.temperature < STALL_C && !at_bottom {
+        core.ticks_at_stage += 1;
+        if core.ticks_at_stage >= LADDER_TICKS {
+            core.shutdown_stage += 1;
+            core.ticks_at_stage = 0;
+        }
+    } else if core.temperature > RESTART_C && core.shutdown_stage > 0 {
+        core.ticks_at_stage += 1;
+        if core.ticks_at_stage >= LADDER_TICKS {
+            core.shutdown_stage -= 1;
+            core.ticks_at_stage = 0;
+        }
+    } else {
+        core.ticks_at_stage = 0;
+    }
+}
+
 /// Interior phase: the standing repair line decays stress (spec 005
-/// section 4, minimal placeholder).
-fn run_repairs(mut hull: ResMut<HullGraph>) {
+/// section 4, minimal placeholder). Repair is drone work: it stops
+/// while the ladder has the drone bays down.
+fn run_repairs(core: Res<EngineCore>, mut hull: ResMut<HullGraph>) {
+    if !core.system_online(ShipSystem::DroneBays) {
+        return;
+    }
     for stress in &mut hull.stress {
         *stress = (*stress - REPAIR_RATE_PER_SECOND * TICK_SECONDS).max(0.0);
     }
@@ -338,10 +498,24 @@ fn run_repairs(mut hull: ResMut<HullGraph>) {
 
 /// Readback phase: interior outcomes become capability the next world
 /// phase reads (spec 002 section 3 rule 3).
-fn read_back_capability(hull: Res<HullGraph>, mut capability: ResMut<Capability>) {
+fn read_back_capability(
+    hull: Res<HullGraph>,
+    core: Res<EngineCore>,
+    mut capability: ResMut<Capability>,
+) {
     let total: f32 = hull.stress.iter().sum();
     let average = total / HULL_NODES as f32;
-    capability.available_thrust = (1.0 - average).clamp(0.0, 1.0);
+    let hull_factor = (1.0 - average).clamp(0.0, 1.0);
+    capability.available_thrust = if core.system_online(ShipSystem::Propulsion) {
+        hull_factor
+    } else {
+        0.0
+    };
+    capability.sensor_coverage = if core.system_online(ShipSystem::Sensors) {
+        1.0
+    } else {
+        0.0
+    };
 }
 
 #[cfg(test)]
@@ -429,21 +603,140 @@ mod tests {
     }
 
     /// The vertical slice actually flows: motion generates events, the
-    /// interior turns them into hull stress and cargo, and capability
-    /// feeds back below 1.0 once stress exists.
+    /// interior turns them into hull stress and cargo, torque demand
+    /// drives fuel burn, and the fed core stays online.
     #[test]
     fn vertical_slice_flows() {
         let sim = scripted_run(42, 400);
         let world = sim.world();
         let kinetics = world.resource::<ShipKinetics>();
         assert!(kinetics.position[0] != 0.0 || kinetics.position[1] != 0.0);
+        assert!(kinetics.torque_demand > 0.0, "no torque demand under way");
+        assert!(
+            kinetics.fuel_burn > IDLE_BURN_PER_SECOND,
+            "torque did not raise fuel demand"
+        );
         let cargo = world.resource::<CargoHold>();
         assert!(
             cargo.amounts.iter().sum::<u64>() > 0,
-            "no ingestion in 400 ticks"
+            "the hold is empty after 400 ticks"
         );
         let bus = world.resource::<EventBus>();
         assert!(bus.next_seq > 0, "no events emitted in 400 ticks");
+        let core = world.resource::<EngineCore>();
+        assert_eq!(core.shutdown_stage, 0, "the fed core walked the ladder");
+    }
+
+    /// A fed core under way holds its operating band: fuel is drawn,
+    /// temperature stays above stall, the ladder never moves (spec 004
+    /// section 3).
+    #[test]
+    fn engine_burns_fuel_and_holds_temperature() {
+        let mut sim = SimWorld::new(9);
+        sim.push_command(Command::SetThrottle { throttle: 1.0 });
+        for _ in 0..400 {
+            sim.tick();
+        }
+        let core = sim.world.resource::<EngineCore>();
+        assert_eq!(core.shutdown_stage, 0);
+        assert!(core.fuel_buffer > 0.0, "the feed line never staged fuel");
+        assert!(core.temperature > STALL_C, "the fed core stalled");
+        assert!(core.temperature < 400.0, "the core ran away hot");
+    }
+
+    /// Starved of fuel, the core chills and walks the shutdown ladder
+    /// in order, farthest-from-core first, propulsion last; readback
+    /// zeroes thrust and sensor coverage (spec 004 section 3).
+    #[test]
+    fn starvation_walks_the_shutdown_ladder() {
+        let mut sim = SimWorld::new(11);
+        sim.world.resource_mut::<CargoHold>().amounts = [0; ResourceKind::ALL.len()];
+        sim.world.resource_mut::<EngineCore>().fuel_buffer = 0.0;
+
+        let mut stages = Vec::new();
+        for _ in 0..1600 {
+            sim.tick();
+            let stage = sim.world.resource::<EngineCore>().shutdown_stage;
+            if stages.last() != Some(&stage) {
+                stages.push(stage);
+            }
+        }
+        assert_eq!(stages, vec![0, 1, 2, 3, 4], "ladder skipped or stalled");
+        let capability = sim.world.resource::<Capability>();
+        assert_eq!(capability.available_thrust, 0.0);
+        assert_eq!(capability.sensor_coverage, 0.0);
+    }
+
+    /// Refueled while only the sensors are down, the core reheats and
+    /// the ladder retraces in reverse (spec 010 section 5).
+    #[test]
+    fn refueling_retraces_the_ladder() {
+        let mut sim = SimWorld::new(13);
+        sim.world.resource_mut::<CargoHold>().amounts = [0; ResourceKind::ALL.len()];
+        sim.world.resource_mut::<EngineCore>().fuel_buffer = 0.0;
+
+        let mut safety = 0;
+        while sim.world.resource::<EngineCore>().shutdown_stage < 1 {
+            sim.tick();
+            safety += 1;
+            assert!(safety < 2000, "ladder never reached stage 1");
+        }
+
+        let biomass = CargoHold::index(ResourceKind::Biomass);
+        sim.world.resource_mut::<CargoHold>().amounts[biomass] = 200;
+        sim.push_command(Command::SetThrottle { throttle: 1.0 });
+        let mut safety = 0;
+        while sim.world.resource::<EngineCore>().shutdown_stage > 0 {
+            sim.tick();
+            safety += 1;
+            assert!(safety < 4000, "ladder never retraced");
+        }
+        assert!(sim.world.resource::<EngineCore>().temperature > RESTART_C);
+        sim.tick();
+        assert!(sim.world.resource::<Capability>().sensor_coverage > 0.0);
+    }
+
+    /// Cold is the default: with the core dead, every compartment
+    /// trends toward ambient exterior temperature and never overshoots
+    /// it (spec 004 section 5).
+    #[test]
+    fn thermal_field_trends_toward_ambient() {
+        let mut sim = SimWorld::new(17);
+        sim.world.resource_mut::<CargoHold>().amounts = [0; ResourceKind::ALL.len()];
+        {
+            let mut core = sim.world.resource_mut::<EngineCore>();
+            core.fuel_buffer = 0.0;
+            core.temperature = AMBIENT_C;
+        }
+        let before = sim.world.resource::<ThermalField>().temps;
+        for _ in 0..600 {
+            sim.tick();
+        }
+        let after = sim.world.resource::<ThermalField>().temps;
+        for (b, a) in before.iter().zip(after.iter()) {
+            assert!(a < b, "a compartment failed to cool");
+            assert!(*a >= AMBIENT_C, "a compartment overshot ambient");
+        }
+    }
+
+    /// An overheating core draws melted intake ice as coolant: the
+    /// stock drains in whole units and the temperature comes down
+    /// (spec 004 section 5).
+    #[test]
+    fn coolant_draws_intake_ice() {
+        let mut sim = SimWorld::new(19);
+        let ice = CargoHold::index(ResourceKind::Ice);
+        let before = sim.world.resource::<CargoHold>().amounts[ice];
+        sim.world.resource_mut::<EngineCore>().temperature = 200.0;
+        for _ in 0..200 {
+            sim.tick();
+        }
+        let after = sim.world.resource::<CargoHold>().amounts[ice];
+        assert!(after < before, "no ice drawn for coolant");
+        assert!(
+            sim.world.resource::<EngineCore>().temperature < 200.0,
+            "coolant failed to pull the core down"
+        );
     }
 
     /// Spec 010 section 7: a tick-rate mismatch is refused, not

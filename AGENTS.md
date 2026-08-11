@@ -84,13 +84,13 @@ review; approved specs are settled authority.
 | 13 | `012-renderers` | approved (2026-08-11) |
 | 14 | `013-ci` | approved (2026-08-11) |
 
-Next pending: the workspace is bootstrapped (specs 009 through 013
-govern it; the sim's determinism test contract is live). The next
-work is growing the vertical slice: implement the remaining state
-domains of spec 010 §5 (engine core, thermal field, drones,
-automation rules), resolve the Weather and Expedition event families
-into interior state, and put first visuals into the renderers. Each
-substantial chunk is its own PR through both gates.
+Next pending: the engine core and thermal field domains are live
+(shutdown ladder, coolant loop, the mass-torque-fuel chain). The
+remaining vertical-slice work, in order: the drones and automation
+rules domains of spec 010 §5 (grounded in spec 005 §2 and §3), then
+resolving the Weather and Expedition event families into interior
+state, then first visuals in the renderers. Each substantial chunk
+is its own PR through both gates.
 
 ## Available Agents
 
