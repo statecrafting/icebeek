@@ -1,0 +1,32 @@
+{
+  "mapping": {
+    "dependsOn": [
+      "008-simulation-substrate"
+    ],
+    "implementingPaths": [
+      {
+        "path": "docs/design/workspace-layout.md",
+        "source": "spec-edge"
+      }
+    ],
+    "resolvedUnits": [
+      {
+        "locations": [
+          {
+            "file": "docs/design/workspace-layout.md"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "file",
+          "path": "docs/design/workspace-layout.md"
+        }
+      }
+    ],
+    "specId": "009-cargo-workspace",
+    "specStatus": "approved"
+  },
+  "schemaVersion": "1.1.0",
+  "shardHash": "7881996f1ed78fed24bf5c345c77ce588fdb7a2e64479c94d0ffe24a339177ac"
+}
