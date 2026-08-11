@@ -8,6 +8,14 @@
       {
         "kind": "file",
         "path": "docs/design/workspace-layout.md"
+      },
+      {
+        "kind": "file",
+        "path": "Cargo.toml"
+      },
+      {
+        "kind": "file",
+        "path": "rust-toolchain.toml"
       }
     ],
     "id": "009-cargo-workspace",
@@ -25,6 +33,6 @@
     "summary": "The first code-facing spec. It fixes the Cargo workspace shape that the Bevy decision (spec 008) implies: a virtual workspace root, five crates under crates/ (icebeek-events, icebeek-sim, icebeek-render-exterior, icebeek-render-interior, icebeek-app), and the dependency rules between them that make the spec 008 hard requirements structural: the event vocabulary knows no engine, the simulation core carries no renderer, the two render crates never touch each other, and the binary crate is the only place everything meets. It also pins the toolchain policy (pinned stable via rust-toolchain.toml, edition 2024, workspace-level dependency versions) and assigns the crate territory that specs 010 through 013 will claim. No code lands under this spec; it is the layout the later specs build inside.\n",
     "title": "Cargo workspace layout: crates, boundaries, and toolchain"
   },
-  "shardHash": "ee67db036339330d8f56ec32bea126f545f0edd9259ff0ac4057e3cf5f60672b",
+  "shardHash": "6d1bb37e12b6e482782f95269344a1fdc18cd7b1b3fc0045d611408a06ff9441",
   "specVersion": "1.1.0"
 }

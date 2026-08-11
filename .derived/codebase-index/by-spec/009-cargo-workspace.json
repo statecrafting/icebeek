@@ -5,11 +5,32 @@
     ],
     "implementingPaths": [
       {
+        "path": "Cargo.toml",
+        "source": "spec-edge"
+      },
+      {
         "path": "docs/design/workspace-layout.md",
+        "source": "spec-edge"
+      },
+      {
+        "path": "rust-toolchain.toml",
         "source": "spec-edge"
       }
     ],
     "resolvedUnits": [
+      {
+        "locations": [
+          {
+            "file": "Cargo.toml"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "file",
+          "path": "Cargo.toml"
+        }
+      },
       {
         "locations": [
           {
@@ -22,11 +43,24 @@
           "kind": "file",
           "path": "docs/design/workspace-layout.md"
         }
+      },
+      {
+        "locations": [
+          {
+            "file": "rust-toolchain.toml"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "file",
+          "path": "rust-toolchain.toml"
+        }
       }
     ],
     "specId": "009-cargo-workspace",
     "specStatus": "approved"
   },
   "schemaVersion": "1.1.0",
-  "shardHash": "7881996f1ed78fed24bf5c345c77ce588fdb7a2e64479c94d0ffe24a339177ac"
+  "shardHash": "5119a1e53fe72e51a2ccb081cf51facad8261166c80392004a2be9440fb83e20"
 }

@@ -7,11 +7,28 @@
     ],
     "implementingPaths": [
       {
+        "path": ".github/workflows/rust.yml",
+        "source": "spec-edge"
+      },
+      {
         "path": "docs/design/ci.md",
         "source": "spec-edge"
       }
     ],
     "resolvedUnits": [
+      {
+        "locations": [
+          {
+            "file": ".github/workflows/rust.yml"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "file",
+          "path": ".github/workflows/rust.yml"
+        }
+      },
       {
         "locations": [
           {
@@ -30,5 +47,5 @@
     "specStatus": "approved"
   },
   "schemaVersion": "1.1.0",
-  "shardHash": "51381cb0c326add10959b5c67276f4cf6c2073e3c6a6e1bf350a82b8792807d7"
+  "shardHash": "5fbcbada57e7ab18d7df3855b1ec241b93a959c78be4ee8f78b218153840a697"
 }

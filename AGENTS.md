@@ -9,12 +9,12 @@ Governance is provided by `spec-spine` (installed on your `PATH`). All
 governed reads of compiled artifacts go through its CLI. Bootstrap spec:
 `specs/000-bootstrap/spec.md`.
 
-The project is a game (working title: Absolute Zero Architecture); the
-design corpus under `specs/` is the product at this stage. The stack is
-decided: Bevy (Rust), recorded in spec `008-simulation-substrate`. The
-repo stays pre-code until the implementation specs (009 onward: Cargo
-workspace, simulation core, event bus, renderers, CI) are authored and
-approved.
+The project is a game (working title: Absolute Zero Architecture),
+built on Bevy (Rust) per spec `008-simulation-substrate`. The Cargo
+workspace under `crates/` is governed by the implementation specs
+(009: workspace layout, 010: simulation core, 011: event bus, 012:
+renderers, 013: CI); the design corpus under `specs/` remains the
+authority the code answers to.
 
 ## New Sessions
 
@@ -84,12 +84,13 @@ review; approved specs are settled authority.
 | 13 | `012-renderers` | approved (2026-08-11) |
 | 14 | `013-ci` | approved (2026-08-11) |
 
-Next pending: the corpus through 013 is approved; the next work is
-the first implementation PR, bootstrapping the Cargo workspace per
-specs 009 through 013 (root manifests, the five crates, rust.yml)
-and adding the establishes edges those specs deferred. Human
-checkpoint before that code lands (orchestrator rule: stop at human
-checkpoints).
+Next pending: the workspace is bootstrapped (specs 009 through 013
+govern it; the sim's determinism test contract is live). The next
+work is growing the vertical slice: implement the remaining state
+domains of spec 010 §5 (engine core, thermal field, drones,
+automation rules), resolve the Weather and Expedition event families
+into interior state, and put first visuals into the renderers. Each
+substantial chunk is its own PR through both gates.
 
 ## Available Agents
 

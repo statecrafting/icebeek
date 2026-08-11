@@ -1,0 +1,10 @@
+{
+  "package": {
+    "kind": "rust-lib",
+    "name": "icebeek-render-exterior",
+    "path": "crates/icebeek-render-exterior",
+    "specRef": "012-renderers"
+  },
+  "schemaVersion": "1.1.0",
+  "shardHash": "5e7f817f91c6791812010bc0da80798e9182d8faaed4e4c8062a7f9da25b9463"
+}

@@ -1,0 +1,18 @@
+[package]
+name = "icebeek-app"
+version.workspace = true
+edition.workspace = true
+description = "The one binary: hosts the sim and both render layers"
+
+[package.metadata.spec-spine]
+spec = "012-renderers"
+
+[[bin]]
+name = "icebeek"
+path = "src/main.rs"
+
+[dependencies]
+bevy = { workspace = true }
+icebeek-sim = { workspace = true }
+icebeek-render-exterior = { workspace = true }
+icebeek-render-interior = { workspace = true }

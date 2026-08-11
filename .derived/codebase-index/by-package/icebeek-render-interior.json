@@ -1,0 +1,10 @@
+{
+  "package": {
+    "kind": "rust-lib",
+    "name": "icebeek-render-interior",
+    "path": "crates/icebeek-render-interior",
+    "specRef": "012-renderers"
+  },
+  "schemaVersion": "1.1.0",
+  "shardHash": "947d2c9e265d748761adece4ac1a25ccbfb48a49fc6abfdb3fe7d500581e0c3f"
+}

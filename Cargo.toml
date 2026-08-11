@@ -1,0 +1,23 @@
+# Spec: 009-cargo-workspace
+# Virtual workspace root: no [package]. All crates live under crates/.
+
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+# One version per shared dependency (spec 009 section 4); member crates
+# reference these with `workspace = true` and never pin their own.
+[workspace.dependencies]
+icebeek-events = { path = "crates/icebeek-events" }
+icebeek-sim = { path = "crates/icebeek-sim" }
+icebeek-render-exterior = { path = "crates/icebeek-render-exterior" }
+icebeek-render-interior = { path = "crates/icebeek-render-interior" }
+
+bevy = "0.19"
+bevy_ecs = "0.19"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

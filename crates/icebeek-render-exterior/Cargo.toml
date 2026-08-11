@@ -1,0 +1,13 @@
+[package]
+name = "icebeek-render-exterior"
+version.workspace = true
+edition.workspace = true
+description = "The Macro view: isometric 3D exterior renderer (read-only over the sim)"
+
+[package.metadata.spec-spine]
+spec = "012-renderers"
+
+[dependencies]
+bevy = { workspace = true }
+icebeek-sim = { workspace = true }
+icebeek-events = { workspace = true }

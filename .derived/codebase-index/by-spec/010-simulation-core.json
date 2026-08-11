@@ -11,11 +11,32 @@
     ],
     "implementingPaths": [
       {
+        "path": "crates/icebeek-sim",
+        "source": "manifest-metadata"
+      },
+      {
+        "path": "crates/icebeek-sim/",
+        "source": "spec-edge"
+      },
+      {
         "path": "docs/design/simulation-core.md",
         "source": "spec-edge"
       }
     ],
     "resolvedUnits": [
+      {
+        "locations": [
+          {
+            "file": "crates/icebeek-sim/"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "directory",
+          "path": "crates/icebeek-sim/"
+        }
+      },
       {
         "locations": [
           {
@@ -34,5 +55,5 @@
     "specStatus": "approved"
   },
   "schemaVersion": "1.1.0",
-  "shardHash": "de1ca51df24cd173aeab95f66350f977d94754d19b413cf5283a0bc35fcc0367"
+  "shardHash": "5b099cdc53b0decd051de02dff1ac45c92525d09b15d5d8517c41a975e326e2e"
 }

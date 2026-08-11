@@ -1,0 +1,28 @@
+# Spec: 013-ci
+# The workspace gate beside the governance gate: format, clippy with
+# warnings denied, the headless test suite, workspace build.
+name: rust
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries for bevy on linux
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libudev-dev pkg-config \
+            libwayland-dev libxkbcommon-dev \
+            libx11-dev libxcursor-dev libxi-dev libxrandr-dev
+      # rustup installs the toolchain rust-toolchain.toml pins; no matrix
+      # (spec 013 section 3).
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Runners have no GPU or display: the sim's determinism suite and
+      # the renderers' structural tests must pass headless here.
+      - run: cargo test --workspace
+      - run: cargo build --workspace

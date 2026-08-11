@@ -1,0 +1,13 @@
+[package]
+name = "icebeek-render-interior"
+version.workspace = true
+edition.workspace = true
+description = "The Micro view: top-down cross-section interior renderer (read-only over the sim)"
+
+[package.metadata.spec-spine]
+spec = "012-renderers"
+
+[dependencies]
+bevy = { workspace = true }
+icebeek-sim = { workspace = true }
+icebeek-events = { workspace = true }

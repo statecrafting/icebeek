@@ -9,11 +9,74 @@
     ],
     "implementingPaths": [
       {
+        "path": "crates/icebeek-app",
+        "source": "manifest-metadata"
+      },
+      {
+        "path": "crates/icebeek-app/",
+        "source": "spec-edge"
+      },
+      {
+        "path": "crates/icebeek-render-exterior",
+        "source": "manifest-metadata"
+      },
+      {
+        "path": "crates/icebeek-render-exterior/",
+        "source": "spec-edge"
+      },
+      {
+        "path": "crates/icebeek-render-interior",
+        "source": "manifest-metadata"
+      },
+      {
+        "path": "crates/icebeek-render-interior/",
+        "source": "spec-edge"
+      },
+      {
         "path": "docs/design/renderers.md",
         "source": "spec-edge"
       }
     ],
     "resolvedUnits": [
+      {
+        "locations": [
+          {
+            "file": "crates/icebeek-app/"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "directory",
+          "path": "crates/icebeek-app/"
+        }
+      },
+      {
+        "locations": [
+          {
+            "file": "crates/icebeek-render-exterior/"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "directory",
+          "path": "crates/icebeek-render-exterior/"
+        }
+      },
+      {
+        "locations": [
+          {
+            "file": "crates/icebeek-render-interior/"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "directory",
+          "path": "crates/icebeek-render-interior/"
+        }
+      },
       {
         "locations": [
           {
@@ -32,5 +95,5 @@
     "specStatus": "approved"
   },
   "schemaVersion": "1.1.0",
-  "shardHash": "0ed736c8c0f6d9128d2b327735192d85095ca90d121e33a78da3f8fcbbccc703"
+  "shardHash": "c73ce205e7402b9b024929399ab0b2fd7718eb9937e9a72799e619b7b03beb95"
 }

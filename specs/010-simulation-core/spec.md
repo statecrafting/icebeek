@@ -13,6 +13,7 @@ depends_on:
   - "009-cargo-workspace"
 establishes:
   - "docs/design/simulation-core.md"
+  - { kind: directory, path: "crates/icebeek-sim/" }
 summary: >
   The contract for crates/icebeek-sim, the single crate where every
   gameplay mechanic of specs 003 through 007 lives. It resolves the
