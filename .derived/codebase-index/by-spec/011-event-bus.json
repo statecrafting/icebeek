@@ -1,0 +1,35 @@
+{
+  "mapping": {
+    "dependsOn": [
+      "002-dual-view-architecture",
+      "008-simulation-substrate",
+      "009-cargo-workspace",
+      "010-simulation-core"
+    ],
+    "implementingPaths": [
+      {
+        "path": "docs/design/event-bus.md",
+        "source": "spec-edge"
+      }
+    ],
+    "resolvedUnits": [
+      {
+        "locations": [
+          {
+            "file": "docs/design/event-bus.md"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "file",
+          "path": "docs/design/event-bus.md"
+        }
+      }
+    ],
+    "specId": "011-event-bus",
+    "specStatus": "approved"
+  },
+  "schemaVersion": "1.1.0",
+  "shardHash": "9eb56e0aa000c3a96add0f94e1ce55f281ca0413991dceb9c55689b5d256a7e2"
+}
