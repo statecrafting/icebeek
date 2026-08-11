@@ -1,0 +1,40 @@
+{
+  "record": {
+    "created": "2026-08-11",
+    "dependsOn": [
+      "003-core-gameplay-loop",
+      "004-ship-systems",
+      "005-automation-control-plane",
+      "006-world-and-expeditions",
+      "007-tech-progression",
+      "008-simulation-substrate",
+      "009-cargo-workspace"
+    ],
+    "establishes": [
+      {
+        "kind": "file",
+        "path": "docs/design/simulation-core.md"
+      }
+    ],
+    "id": "010-simulation-core",
+    "sectionHeadings": [
+      "010: Simulation core",
+      "1. Purpose",
+      "2. The ECS decision",
+      "3. Tick model",
+      "4. Determinism discipline",
+      "5. State domains",
+      "6. Write paths",
+      "7. Save contract",
+      "8. Test contract",
+      "9. Territory",
+      "10. Out of scope"
+    ],
+    "specPath": "specs/010-simulation-core/spec.md",
+    "status": "approved",
+    "summary": "The contract for crates/icebeek-sim, the single crate where every gameplay mechanic of specs 003 through 007 lives. It resolves the question spec 009 deferred: the core uses bevy_ecs alone (the ECS library, never the bevy umbrella), with determinism enforced by normative discipline: a single-threaded, totally ordered tick schedule, no wall clock, no order-sensitive iteration over unordered collections, and one seeded RNG that only exterior event-generation systems may draw from. It pins the fixed-tick model (TICK_HZ, initially 20, host-driven accumulator, renderers interpolate), the top-level state domains, typed player commands as the only outside write path, and the test contract: headless execution, byte-identical replay, and save/load equivalence. The crate directory edge is added when the crate lands; until then this spec owns its design brief.\n",
+    "title": "Simulation core: one crate of truth, fixed tick, determinism discipline"
+  },
+  "shardHash": "885c2666cf1084542d2ead06a13c68306b53573dbdf297d9d64b437b64a00898",
+  "specVersion": "1.1.0"
+}

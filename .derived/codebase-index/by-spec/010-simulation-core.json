@@ -1,0 +1,38 @@
+{
+  "mapping": {
+    "dependsOn": [
+      "003-core-gameplay-loop",
+      "004-ship-systems",
+      "005-automation-control-plane",
+      "006-world-and-expeditions",
+      "007-tech-progression",
+      "008-simulation-substrate",
+      "009-cargo-workspace"
+    ],
+    "implementingPaths": [
+      {
+        "path": "docs/design/simulation-core.md",
+        "source": "spec-edge"
+      }
+    ],
+    "resolvedUnits": [
+      {
+        "locations": [
+          {
+            "file": "docs/design/simulation-core.md"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "file",
+          "path": "docs/design/simulation-core.md"
+        }
+      }
+    ],
+    "specId": "010-simulation-core",
+    "specStatus": "approved"
+  },
+  "schemaVersion": "1.1.0",
+  "shardHash": "de1ca51df24cd173aeab95f66350f977d94754d19b413cf5283a0bc35fcc0367"
+}
