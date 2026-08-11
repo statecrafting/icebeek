@@ -180,6 +180,12 @@ field latitude, so they are pinned here:
   render layers only observe it.
 - A recorded command log plus the run seed replays a run segment
   exactly (the replay test below is this property, enforced).
+- **The presentation read path is a typed snapshot.** The sim
+  exposes a copy of the render-relevant surface at the last
+  completed tick; renderers hold snapshot copies, never references
+  into the world, and snapshots are never serialized (spec 012 §2).
+  What the snapshot carries is implementation latitude; that it is a
+  copy is not.
 
 ## 7. Save contract
 
