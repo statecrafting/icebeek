@@ -81,10 +81,11 @@ review; approved specs are settled authority.
 | 10 | `009-cargo-workspace` | approved (2026-08-11) |
 | 11 | `010-simulation-core` | approved (2026-08-11) |
 | 12 | `011-event-bus` | approved (2026-08-11) |
+| 13 | `012-renderers` | approved (2026-08-11) |
 
-Next pending: author the remaining implementation specs on the Bevy
-decision (012: the two renderers; 013: CI), each a human checkpoint
-before its code lands (orchestrator rule: stop at human checkpoints).
+Next pending: author the last implementation spec on the Bevy
+decision (013: CI), a human checkpoint before its code lands
+(orchestrator rule: stop at human checkpoints).
 
 ## Available Agents
 

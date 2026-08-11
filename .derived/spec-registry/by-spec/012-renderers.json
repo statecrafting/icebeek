@@ -1,0 +1,36 @@
+{
+  "record": {
+    "created": "2026-08-11",
+    "dependsOn": [
+      "002-dual-view-architecture",
+      "008-simulation-substrate",
+      "009-cargo-workspace",
+      "010-simulation-core",
+      "011-event-bus"
+    ],
+    "establishes": [
+      {
+        "kind": "file",
+        "path": "docs/design/renderers.md"
+      }
+    ],
+    "id": "012-renderers",
+    "sectionHeadings": [
+      "012: The renderers",
+      "1. Purpose",
+      "2. Shared presentation rules",
+      "3. The exterior renderer (the Macro)",
+      "4. The interior renderer (the Micro)",
+      "5. The app shell",
+      "6. Test contract",
+      "7. Territory",
+      "8. Out of scope"
+    ],
+    "specPath": "specs/012-renderers/spec.md",
+    "status": "approved",
+    "summary": "The contract for the presentation layer: crates/icebeek-render-exterior (the Macro, isometric 3D), crates/icebeek-render-interior (the Micro, top-down cross-section), and crates/icebeek-app (the one binary and the host). The shared rules make spec 008 requirement 5 structural: render crates read simulation state through queries and push typed commands, never mutating state directly; presentation entities are never serialized; every visual interpolates between the last two sim ticks. The app owns the window, the fixed-timestep driver that ticks the sim, input capture into commands, save/load orchestration, and the single fast camera/audio crossfade between views. The sim ticks regardless of which view is focused: the unfocused renderer idles, the simulation never does. Crate directory edges are added when the crates land; until then this spec owns its design brief.\n",
+    "title": "The renderers: two views, one shell, read-only over one truth"
+  },
+  "shardHash": "b2feb8b3d3e1a44fd1cc3abd780fc9066a1fbba1efb7248948597bc431b4cff4",
+  "specVersion": "1.1.0"
+}
