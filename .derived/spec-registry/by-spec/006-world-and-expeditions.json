@@ -1,0 +1,31 @@
+{
+  "record": {
+    "created": "2026-08-10",
+    "dependsOn": [
+      "002-dual-view-architecture",
+      "003-core-gameplay-loop"
+    ],
+    "establishes": [
+      {
+        "kind": "file",
+        "path": "docs/design/world.md"
+      }
+    ],
+    "id": "006-world-and-expeditions",
+    "sectionHeadings": [
+      "006: The world and expeditions",
+      "1. Purpose",
+      "2. The map and the Fog of Winter",
+      "3. Ice topography",
+      "4. Iceberg Node expeditions",
+      "5. Dynamic weather",
+      "6. Out of scope"
+    ],
+    "specPath": "specs/006-world-and-expeditions/spec.md",
+    "status": "approved",
+    "summary": "The frozen ocean as the game's event generator. The map is procedurally generated and obscured by a Fog of Winter. Ice topography comes in classes with distinct resistance and yield: pancake ice (easy, poor), pack ice (moderate, holds trapped shipwrecks), and glacial walls (massive momentum or advanced tech to breach, hiding high-tier blueprints). Iceberg Nodes (frozen skyscrapers, dormant volcanoes) are anchor-and-strip-mine expedition sites under shifting-ice time pressure. Dynamic weather attacks the ship's systems directly: super-storms freeze intake valves and force manual overrides; solar flares scramble drone logic and force mechanical fallbacks.\n",
+    "title": "The world: Fog of Winter, ice topography, expeditions, weather"
+  },
+  "shardHash": "e51fdbf67e73f5ea1796b112bf45187910de688c217bf953f8adfcbf29399b95",
+  "specVersion": "1.1.0"
+}

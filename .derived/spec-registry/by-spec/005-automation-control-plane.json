@@ -1,0 +1,30 @@
+{
+  "record": {
+    "created": "2026-08-10",
+    "dependsOn": [
+      "004-ship-systems"
+    ],
+    "establishes": [
+      {
+        "kind": "file",
+        "path": "docs/design/automation.md"
+      }
+    ],
+    "id": "005-automation-control-plane",
+    "sectionHeadings": [
+      "005: The automation control plane",
+      "1. Purpose",
+      "2. Autonomous drones",
+      "3. State-driven automation",
+      "4. Hull integrity",
+      "5. Weight and drag",
+      "6. Out of scope"
+    ],
+    "specPath": "specs/005-automation-control-plane/spec.md",
+    "status": "approved",
+    "summary": "The player acts as the central Architect, building systems that run themselves instead of micromanaging crew. Four mechanics: autonomous drones (repair, logistics, scouting) with player-defined zones and operational logic; state-driven automation expressed as strict logic gates over resource state; hull integrity as a continuous manufacturing and repair-routing obligation that scales with ice pressure; and the weight-and-drag economy, where every module adds mass, mass raises the torque needed to break ice, and torque raises fuel burn, taxing sprawl and rewarding ruthless efficiency.\n",
+    "title": "Automation: drones, logic gates, hull integrity, mass budget"
+  },
+  "shardHash": "e43e5f9b35f830392abaff4c19a2433f8c240392fcad567c40dae3bb385611b5",
+  "specVersion": "1.1.0"
+}

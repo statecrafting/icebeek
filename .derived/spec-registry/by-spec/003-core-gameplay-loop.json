@@ -1,0 +1,30 @@
+{
+  "record": {
+    "created": "2026-08-10",
+    "dependsOn": [
+      "001-absolute-zero-vision",
+      "002-dual-view-architecture"
+    ],
+    "establishes": [
+      {
+        "kind": "file",
+        "path": "docs/design/core-loop.md"
+      }
+    ],
+    "id": "003-core-gameplay-loop",
+    "sectionHeadings": [
+      "003: The core gameplay loop",
+      "1. Purpose",
+      "2. The three phases",
+      "3. The failure spiral",
+      "4. Pacing contract",
+      "5. Out of scope"
+    ],
+    "specPath": "specs/003-core-gameplay-loop/spec.md",
+    "status": "approved",
+    "summary": "The continuous three-phase cycle the whole game runs on. Navigating and breaking (the Macro): chart a course through ice of varying density, trading fuel and prow damage for speed and yield. Scavenging and ingestion (the intake): raw materials ground out of the ice enter the primary cargo hold. Building and automating (the Micro): route materials through refineries, fabricators, and the engine core, building a closed-loop control plane. The loop is a spiral, not a circle: each pass leaves the ship heavier, hungrier, and more capable, and stopping at any point begins the crush-death clock.\n",
+    "title": "The core gameplay loop: break, ingest, build"
+  },
+  "shardHash": "65f6690147d710cd1eff1fcc74c3723fd21bd81774da142e86e32a138c11b183",
+  "specVersion": "1.1.0"
+}

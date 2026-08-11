@@ -1,0 +1,30 @@
+{
+  "record": {
+    "created": "2026-08-10",
+    "dependsOn": [
+      "003-core-gameplay-loop"
+    ],
+    "establishes": [
+      {
+        "kind": "file",
+        "path": "docs/design/ship-systems.md"
+      }
+    ],
+    "id": "004-ship-systems",
+    "sectionHeadings": [
+      "004: Ship systems",
+      "1. Purpose",
+      "2. The Prow",
+      "3. The Engine Core",
+      "4. The Internal Grid",
+      "5. Heat distribution",
+      "6. Out of scope"
+    ],
+    "specPath": "specs/004-ship-systems/spec.md",
+    "status": "approved",
+    "summary": "The ship as a mobile base: a massive multi-decked behemoth whose limited internal space makes architectural planning critical. Four subsystems: the Prow (the upgradeable drill/ram interface to the ice), the Engine Core (the fuel-burning heart whose temperature gates every other system), the Internal Grid (a node-based room and logistics-spine building system rendered in the Micro cross-section view), and Heat Distribution (thermodynamics as a routing problem: machinery must be cooled, exhaust can be harvested, biology must be warmed).\n",
+    "title": "The icebreaker: prow, engine core, internal grid, heat"
+  },
+  "shardHash": "176bc1d42792de1cf914a7e125e72898e40bd043c0d5b838f6812b21d76ce0f8",
+  "specVersion": "1.1.0"
+}

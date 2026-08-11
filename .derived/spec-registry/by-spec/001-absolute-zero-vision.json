@@ -1,0 +1,33 @@
+{
+  "record": {
+    "created": "2026-08-10",
+    "dependsOn": [
+      "000-bootstrap"
+    ],
+    "establishes": [
+      {
+        "kind": "file",
+        "path": "README.md"
+      },
+      {
+        "kind": "directory",
+        "path": "docs/ideas/"
+      }
+    ],
+    "id": "001-absolute-zero-vision",
+    "sectionHeadings": [
+      "001: Absolute Zero Architecture, the game vision",
+      "1. Purpose",
+      "2. The core tension",
+      "3. Design pillars",
+      "4. Territory",
+      "5. Out of scope"
+    ],
+    "specPath": "specs/001-absolute-zero-vision/spec.md",
+    "status": "approved",
+    "summary": "The founding design thesis for icebeek (working title: Absolute Zero Architecture). A survival base-builder / resource-management / automation game in which the player commands a colossal, perpetually moving icebreaker across a frozen ocean: ram through shifting glaciers to harvest ancient scrap, build an automated industrial grid inside the hull, and keep the engine core burning through an eternal winter. The core tension is forward momentum versus internal stability; the core aesthetic contrast is a chaotic, hostile frozen exterior against a deterministic, efficient, automated interior. This spec is the authority every downstream system spec refines; a system that does not serve the tension or the contrast does not ship.\n",
+    "title": "Absolute Zero Architecture: the game vision"
+  },
+  "shardHash": "6029c994cbf99f6a08fdfcb7f7f5c2364e9da1f37223ae2e796df0ae06fe7b63",
+  "specVersion": "1.1.0"
+}

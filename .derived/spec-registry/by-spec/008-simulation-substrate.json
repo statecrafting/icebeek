@@ -1,0 +1,28 @@
+{
+  "record": {
+    "created": "2026-08-10",
+    "dependsOn": [
+      "002-dual-view-architecture"
+    ],
+    "establishes": [
+      {
+        "kind": "file",
+        "path": "docs/design/stack-decision.md"
+      }
+    ],
+    "id": "008-simulation-substrate",
+    "sectionHeadings": [
+      "008: Simulation substrate",
+      "1. Purpose",
+      "2. Hard requirements on any candidate stack",
+      "3. The decision: Bevy (Rust)",
+      "4. Out of scope"
+    ],
+    "specPath": "specs/008-simulation-substrate/spec.md",
+    "status": "approved",
+    "summary": "The first implementation-facing spec. It pins the technical requirements any stack must satisfy (a deterministic fixed-tick interior simulation that runs headless, a typed Macro-to-Micro event bus, save states as pure serialized state, and a two-renderer presentation over one simulation) and records the stack decision taken at the 2026-08-11 human checkpoint: the game is built on Bevy (Rust). The simulation core is authored as a pure, renderer-free crate; the two views are Bevy render layers over that one crate. Implementation specs (009 onward) claim the concrete crate territory via establishes edges as they are authored.\n",
+    "title": "Simulation substrate: tick model, event bus, and the stack decision"
+  },
+  "shardHash": "90bd067368241a2e12ee2aba58e3e42cc6740ad476bdff5f7564e10a25529bd9",
+  "specVersion": "1.1.0"
+}

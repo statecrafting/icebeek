@@ -1,0 +1,32 @@
+{
+  "mapping": {
+    "dependsOn": [
+      "001-absolute-zero-vision"
+    ],
+    "implementingPaths": [
+      {
+        "path": "docs/design/dual-view.md",
+        "source": "spec-edge"
+      }
+    ],
+    "resolvedUnits": [
+      {
+        "locations": [
+          {
+            "file": "docs/design/dual-view.md"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "file",
+          "path": "docs/design/dual-view.md"
+        }
+      }
+    ],
+    "specId": "002-dual-view-architecture",
+    "specStatus": "approved"
+  },
+  "schemaVersion": "1.1.0",
+  "shardHash": "4bd10f3c11e698f74e950b764a3c0666bf2c265ee6eb9440bd235954f4dafb75"
+}

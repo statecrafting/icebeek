@@ -1,0 +1,29 @@
+{
+  "record": {
+    "created": "2026-08-10",
+    "dependsOn": [
+      "001-absolute-zero-vision"
+    ],
+    "establishes": [
+      {
+        "kind": "file",
+        "path": "docs/design/dual-view.md"
+      }
+    ],
+    "id": "002-dual-view-architecture",
+    "sectionHeadings": [
+      "002: Dual-view architecture",
+      "1. Purpose",
+      "2. View responsibilities",
+      "3. The coupling contract",
+      "4. Determinism requirement",
+      "5. Out of scope"
+    ],
+    "specPath": "specs/002-dual-view-architecture/spec.md",
+    "status": "approved",
+    "summary": "The decided presentation split. World exploration renders as an isometric 3D exterior view (the Macro); ship building renders as a top-down cross-section interior view (the Micro), in the lineage of Fallout Shelter / Oxygen Not Included for the interior and Factorio / Dyson Sphere Program for the exterior scale feel. The two views never render each other's detail; they communicate exclusively through shared simulation state. The Macro is the unpredictable event generator, the Micro is the deterministic control plane that must absorb and resolve those events. This spec defines what each view owns, the event-to-state coupling contract between them, and the determinism requirement on the interior simulation.\n",
+    "title": "Dual-view architecture: isometric event generator, cross-section control plane"
+  },
+  "shardHash": "1f5ea7b56beecc35417823e06c74c6146a018773735f1da3a57ccf629ec1fa5b",
+  "specVersion": "1.1.0"
+}
