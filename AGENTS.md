@@ -79,11 +79,12 @@ review; approved specs are settled authority.
 | 8 | `007-tech-progression` | approved (2026-08-11) |
 | 9 | `008-simulation-substrate` | approved (2026-08-11): stack decided, Bevy (Rust) |
 | 10 | `009-cargo-workspace` | approved (2026-08-11) |
+| 11 | `010-simulation-core` | approved (2026-08-11) |
 
 Next pending: author the remaining implementation specs on the Bevy
-decision (010: simulation core crate; 011: event bus; 012: the two
-renderers; 013: CI), each a human checkpoint before its code lands
-(orchestrator rule: stop at human checkpoints).
+decision (011: event bus; 012: the two renderers; 013: CI), each a
+human checkpoint before its code lands (orchestrator rule: stop at
+human checkpoints).
 
 ## Available Agents
 
