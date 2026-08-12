@@ -39,6 +39,6 @@
     "summary": "The contract for crates/icebeek-sim, the single crate where every gameplay mechanic of specs 003 through 007 lives. It resolves the question spec 009 deferred: the core uses bevy_ecs alone (the ECS library, never the bevy umbrella), with determinism enforced by normative discipline: a single-threaded, totally ordered tick schedule, no wall clock, no order-sensitive iteration over unordered collections, and one seeded RNG that only exterior event-generation systems may draw from. It pins the fixed-tick model (TICK_HZ, initially 20, host-driven accumulator, renderers interpolate), the top-level state domains, typed player commands as the only outside write path, and the test contract: headless execution, byte-identical replay, and save/load equivalence. The crate directory edge is added when the crate lands; until then this spec owns its design brief.\n",
     "title": "Simulation core: one crate of truth, fixed tick, determinism discipline"
   },
-  "shardHash": "916bf07cade2379fd11937fbac05f90313f5f174fcae1985fa142d66688e8d58",
+  "shardHash": "7fa109f8c66ac8701e325ddcff64e9e0327946c9bb5d4ed2d5072b77301a6a68",
   "specVersion": "1.1.0"
 }
