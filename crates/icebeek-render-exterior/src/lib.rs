@@ -1,13 +1,16 @@
 //! The Macro view (spec 012 section 3): isometric 3D exterior.
 //!
-//! First visuals: the frozen ocean plane, the ship silhouette moving
-//! and turning between interpolated ticks, an Iceberg Node marker
-//! when a site is alongside, and storm- or flare-tinted light. All
-//! systems read the sim through the snapshot pair the app maintains
-//! (spec 012 section 2); nothing here writes simulation state.
+//! The frozen ocean and its ice topography (spec 014): a tile window
+//! of ice classes around the ship, with unrevealed terrain painted
+//! as the Fog of Winter; the ship silhouette moving and turning
+//! between interpolated ticks; an Iceberg Node marker when a site is
+//! alongside; storm- or flare-tinted light. All systems read the sim
+//! through the snapshot pair the app maintains (spec 012 section 2),
+//! and the terrain only through the snapshot's terrain window (spec
+//! 014 section 4); nothing here writes simulation state.
 
 use bevy::prelude::*;
-use icebeek_sim::SimSnapshots;
+use icebeek_sim::{CELL_UNITS, IceClass, SimSnapshots, TERRAIN_VIEW_SIDE, cell_center};
 
 /// Marker for the Macro camera; the app shell toggles focus between
 /// the two views (spec 012 section 5 rule 4).
@@ -23,11 +26,43 @@ struct SiteVisual;
 #[derive(Component)]
 struct SkyLight;
 
+/// One tile of the terrain window; `index` is row-major into the
+/// snapshot's [`icebeek_sim::TerrainView`].
+#[derive(Component)]
+struct TerrainTile {
+    index: usize,
+}
+
 /// Camera offset from the ship, chosen for an isometric read.
 const CAMERA_OFFSET: Vec3 = Vec3::new(26.0, 30.0, 26.0);
 /// Illuminance of a clear sky and of a storm-darkened one.
 const CLEAR_LUX: f32 = 10_000.0;
 const STORM_LUX: f32 = 2_500.0;
+/// The Fog of Winter: what unrevealed terrain paints as.
+const FOG_COLOR: Color = Color::srgb(0.06, 0.07, 0.1);
+/// Height of the terrain tiles above the ocean plane.
+const TILE_HEIGHT: f32 = 0.02;
+
+/// The presentation palette for the spec 014 ice classes.
+pub fn class_color(class: IceClass) -> Color {
+    match class {
+        IceClass::OpenWater => Color::srgb(0.1, 0.22, 0.35),
+        IceClass::PancakeIce => Color::srgb(0.78, 0.85, 0.91),
+        IceClass::PackIce => Color::srgb(0.92, 0.95, 0.97),
+        IceClass::GlacialWall => Color::srgb(0.52, 0.66, 0.8),
+    }
+}
+
+/// Unrevealed terrain is fog, whatever its class (spec 014 section
+/// 4): the exterior never leaks topography the sensors have not
+/// earned.
+pub fn tile_color(class: IceClass, revealed: bool) -> Color {
+    if revealed {
+        class_color(class)
+    } else {
+        FOG_COLOR
+    }
+}
 
 pub struct ExteriorRenderPlugin;
 
@@ -35,7 +70,13 @@ impl Plugin for ExteriorRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_exterior).add_systems(
             Update,
-            (place_ship, follow_camera, place_site_marker, tint_sky_light),
+            (
+                place_ship,
+                follow_camera,
+                place_site_marker,
+                tint_sky_light,
+                paint_terrain,
+            ),
         );
     }
 }
@@ -62,16 +103,36 @@ fn spawn_exterior(
         },
         Transform::from_xyz(20.0, 40.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
-    // The frozen ocean: one large plane; real ice topography arrives
-    // with the world-content slice (spec 006 section 3).
+    // The backdrop plane beneath the tile window, fog-colored so the
+    // world beyond sensor reach reads as the Fog of Winter.
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(2000.0, 2000.0))),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.86, 0.92, 0.96),
+            base_color: FOG_COLOR,
             perceptual_roughness: 0.9,
             ..default()
         })),
     ));
+    // The ice topography (spec 014): one tile per cell of the
+    // snapshot's terrain window, repositioned and repainted per
+    // frame from the snapshot alone.
+    let tile_mesh = meshes.add(
+        Plane3d::default()
+            .mesh()
+            .size(CELL_UNITS as f32, CELL_UNITS as f32),
+    );
+    for index in 0..TERRAIN_VIEW_SIDE * TERRAIN_VIEW_SIDE {
+        commands.spawn((
+            TerrainTile { index },
+            Mesh3d(tile_mesh.clone()),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: FOG_COLOR,
+                perceptual_roughness: 0.95,
+                ..default()
+            })),
+            Transform::from_xyz(0.0, TILE_HEIGHT, 0.0),
+        ));
+    }
     commands.spawn((
         ShipVisual,
         Mesh3d(meshes.add(Cuboid::new(4.2, 1.4, 1.8))),
@@ -178,6 +239,33 @@ fn place_site_marker(
     }
 }
 
+/// Terrain presentation (spec 014, spec 012 section 3): every tile
+/// takes its cell and color from the current snapshot's terrain
+/// window, fog for anything unrevealed. The window recenters with
+/// the ship, so tiles reposition rather than respawn.
+fn paint_terrain(
+    snapshots: Res<SimSnapshots>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut query: Query<(
+        &TerrainTile,
+        &mut Transform,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
+) {
+    let terrain = &snapshots.curr.terrain;
+    for (tile, mut transform, material) in &mut query {
+        if tile.index >= terrain.classes.len() {
+            continue;
+        }
+        let cell = terrain.cell_at(tile.index);
+        transform.translation = scene_position(cell_center(cell), TILE_HEIGHT);
+        if let Some(mut material) = materials.get_mut(&material.0) {
+            material.base_color =
+                tile_color(terrain.classes[tile.index], terrain.revealed[tile.index]);
+        }
+    }
+}
+
 /// Weather presentation: storms darken the sky, flares warm its color
 /// (spec 012 section 3; the mechanics travel as events, spec 006).
 fn tint_sky_light(
@@ -227,5 +315,42 @@ mod tests {
     fn scene_mapping_flips_the_lateral_axis() {
         let mapped = scene_position([3.0, 4.0], 0.5);
         assert_eq!(mapped, Vec3::new(3.0, 0.5, -4.0));
+    }
+
+    /// Spec 014 section 4: unrevealed terrain paints as fog whatever
+    /// its class; no class leaks through the Fog of Winter.
+    #[test]
+    fn fog_hides_every_class() {
+        for class in [
+            IceClass::OpenWater,
+            IceClass::PancakeIce,
+            IceClass::PackIce,
+            IceClass::GlacialWall,
+        ] {
+            assert_eq!(tile_color(class, false), FOG_COLOR);
+            assert_ne!(
+                tile_color(class, true),
+                FOG_COLOR,
+                "{class:?} is indistinguishable from fog when revealed"
+            );
+        }
+    }
+
+    /// The four class colors read as four different terrains.
+    #[test]
+    fn class_colors_are_distinct() {
+        let classes = [
+            IceClass::OpenWater,
+            IceClass::PancakeIce,
+            IceClass::PackIce,
+            IceClass::GlacialWall,
+        ];
+        for a in classes {
+            for b in classes {
+                if a != b {
+                    assert_ne!(class_color(a), class_color(b), "{a:?} and {b:?} collide");
+                }
+            }
+        }
     }
 }

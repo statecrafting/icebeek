@@ -2,7 +2,7 @@
 //! domain table. Field-level shapes are implementation latitude; the
 //! domain list and its design authority are pinned by the spec.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 
 use bevy_ecs::prelude::Resource;
 use icebeek_events::{Event, EventPayload, EventQueue, ResourceKind, Tick};
@@ -52,6 +52,11 @@ pub struct ShipKinetics {
     pub torque_demand: f32,
     /// Fuel demand at the current torque, in fuel units per second.
     pub fuel_burn: f32,
+    /// Prow degradation in [0, 1], accrued per world unit broken
+    /// through at the ice class's profiled rate (spec 004 section 2
+    /// via spec 014 section 3). The loadout tracks that spend and
+    /// reset it arrive with the tech-tier slice.
+    pub prow_wear: f32,
 }
 
 /// Hull graph domain (spec 005 section 4): stress per node in [0, 1].
@@ -292,14 +297,32 @@ pub struct ExpeditionState {
     pub haul_countdown: u32,
 }
 
+/// The Fog of Winter (spec 014 section 4): the monotonic reveal set,
+/// in world cells. Once seen, always seen; together with the map
+/// seed it is the only stored world content. A `BTreeSet` keeps
+/// iteration and serialization in sorted, deterministic order.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct FogOfWinter {
+    pub revealed: BTreeSet<(i64, i64)>,
+}
+
+impl FogOfWinter {
+    pub fn is_revealed(&self, cell: (i64, i64)) -> bool {
+        self.revealed.contains(&cell)
+    }
+}
+
 /// World domain (spec 010 section 5, spec 006): the exterior event
-/// generator's state. The map, Fog of Winter, and ice field arrive
-/// with the exterior content slice; this slice carries weather and
-/// expeditions.
+/// generator's state. The ice field itself is never stored: it is a
+/// pure function of (`map_seed`, position) in the `world_field`
+/// module (spec 014 section 2).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Resource)]
 pub struct WorldDomain {
+    /// The map seed the whole ice field derives from on demand.
+    pub map_seed: u64,
     pub weather: WeatherState,
     pub expedition: ExpeditionState,
+    pub fog: FogOfWinter,
 }
 
 /// What a tier-1 rule can test (spec 005 section 3: levels,

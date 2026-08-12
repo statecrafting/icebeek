@@ -19,7 +19,7 @@ use crate::{SaveState, TICK_HZ};
 /// changes (spec 011 section 6), increments this by one and either
 /// appends the matching step to `MIGRATIONS` or states in the bump
 /// PR that older saves are now refused (spec 017 section 4).
-pub const SAVE_FORMAT_VERSION: u32 = 1;
+pub const SAVE_FORMAT_VERSION: u32 = 2;
 
 /// Typed load refusals (spec 017 section 3). Every branch names the
 /// versions involved; no load path panics or partially applies.
@@ -92,9 +92,36 @@ pub struct Migration {
     pub run: fn(Value) -> Result<Value, String>,
 }
 
-/// The authored chain, one step per released format bump. Empty at
-/// format version 1: there is no older released format to migrate.
-static MIGRATIONS: &[Migration] = &[];
+/// The authored chain, one step per released format bump.
+static MIGRATIONS: &[Migration] = &[Migration {
+    from: 1,
+    run: migrate_v1_to_v2,
+}];
+
+/// v1 to v2 (spec 014, world content): the world domain gains
+/// `map_seed` and the Fog of Winter reveal set, and ship kinetics
+/// gains `prow_wear`. All three are synthesized fresh-run defaults,
+/// with gameplay-visible consequences: a migrated run's ice field
+/// materializes from map seed 0 (v1 never recorded a map seed), its
+/// map starts unexplored beyond what re-reveals around the ship, and
+/// its prow starts unworn.
+fn migrate_v1_to_v2(mut envelope: Value) -> Result<Value, String> {
+    let payload = envelope
+        .get_mut("payload")
+        .ok_or("v1 save has no payload")?;
+    let world = payload
+        .get_mut("world")
+        .and_then(Value::as_object_mut)
+        .ok_or("v1 save has no world domain")?;
+    world.insert("map_seed".into(), 0u64.into());
+    world.insert("fog".into(), serde_json::json!({ "revealed": [] }));
+    let kinetics = payload
+        .get_mut("kinetics")
+        .and_then(Value::as_object_mut)
+        .ok_or("v1 save has no kinetics domain")?;
+    kinetics.insert("prow_wear".into(), 0.0f32.into());
+    Ok(envelope)
+}
 
 /// The write-side envelope (spec 017 section 2). `crate_version` and
 /// `tick_hz` are diagnostics; `format_version` is the authority.
@@ -211,7 +238,10 @@ mod tests {
     /// Each released format version keeps a committed fixture save
     /// (spec 017 section 5 test 1). Released fixtures are frozen:
     /// never regenerate an old version's file.
-    const FIXTURES: &[(u32, &str)] = &[(1, include_str!("../fixtures/format-v1.json"))];
+    const FIXTURES: &[(u32, &str)] = &[
+        (1, include_str!("../fixtures/format-v1.json")),
+        (2, include_str!("../fixtures/format-v2.json")),
+    ];
 
     /// A deterministic scripted run rich enough that every domain
     /// serializes something interesting.
@@ -418,6 +448,11 @@ mod tests {
     fn migration_may_convert_tick_rate() {
         let mut envelope = current_envelope();
         envelope["tick_hz"] = 10.into();
+        // Pin the walk to a version-1 claim so the synthetic chain
+        // below is what runs, whatever the current version is. The
+        // payload stays current-format; only the rate rule is under
+        // test here.
+        envelope["format_version"] = 1.into();
         let bytes = serde_json::to_vec(&envelope).unwrap();
         const CONVERTS: &[Migration] = &[Migration {
             from: 1,

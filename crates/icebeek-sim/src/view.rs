@@ -10,6 +10,36 @@ use bevy_ecs::prelude::Resource;
 use icebeek_events::ResourceKind;
 
 use crate::state::{COMPARTMENTS, HULL_NODES};
+use crate::world_field::IceClass;
+
+/// Side length, in cells, of the terrain window a snapshot carries.
+pub const TERRAIN_VIEW_SIDE: usize = 33;
+
+/// The terrain the exterior draws (spec 014, spec 012 section 3): a
+/// square window of ice classes and reveal flags centered on the
+/// ship's cell. The renderer reads the field and the Fog of Winter
+/// through this surface and no other path.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TerrainView {
+    /// The cell at the window center (the ship's cell).
+    pub center: (i64, i64),
+    /// Window side length in cells; the vectors hold `side * side`
+    /// row-major entries.
+    pub side: usize,
+    pub classes: Vec<IceClass>,
+    pub revealed: Vec<bool>,
+}
+
+impl TerrainView {
+    /// The cell offset from the window's top-left corner for a
+    /// row-major index.
+    pub fn cell_at(&self, index: usize) -> (i64, i64) {
+        let half = self.side as i64 / 2;
+        let row = (index / self.side) as i64;
+        let col = (index % self.side) as i64;
+        (self.center.0 + col - half, self.center.1 + row - half)
+    }
+}
 
 /// A copy of the render-relevant surface at one completed tick.
 #[derive(Debug, Clone, PartialEq)]
@@ -30,6 +60,7 @@ pub struct SimSnapshot {
     pub site_available: bool,
     pub anchored_at_site: bool,
     pub crush_pressure: f32,
+    pub terrain: TerrainView,
 }
 
 /// The pair of consecutive snapshots the app maintains and render
@@ -78,7 +109,30 @@ mod tests {
             site_available: false,
             anchored_at_site: false,
             crush_pressure: 0.0,
+            terrain: TerrainView {
+                center: (0, 0),
+                side: 1,
+                classes: vec![IceClass::OpenWater],
+                revealed: vec![false],
+            },
         }
+    }
+
+    /// A terrain window's row-major indexing centers on the ship's
+    /// cell: the middle index is the center, corners are offset by
+    /// half the side.
+    #[test]
+    fn terrain_window_indexing_centers_on_the_ship() {
+        let side = 5;
+        let view = TerrainView {
+            center: (10, -4),
+            side,
+            classes: vec![IceClass::OpenWater; side * side],
+            revealed: vec![false; side * side],
+        };
+        assert_eq!(view.cell_at(side * side / 2), (10, -4));
+        assert_eq!(view.cell_at(0), (8, -6));
+        assert_eq!(view.cell_at(side * side - 1), (12, -2));
     }
 
     /// The pair always holds two consecutive captures: advance moves
