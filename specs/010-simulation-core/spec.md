@@ -166,6 +166,14 @@ field latitude, so they are pinned here:
   progression resolves as ambient stress distributed across the
   whole hull graph, and extraction hauls travel as ordinary
   Ingestion events (spec 006 §4).
+- **World field and reveal.** The ice field is a pure function of
+  (map seed, position), computed on demand through seed-keyed
+  hashing; field lookups draw nothing from the event RNG, so
+  sensing, however frequent, cannot perturb the event stream (spec
+  014 §2). The Fog of Winter reveal set is monotonic and grows in
+  deterministic cell order from the ship's cell with a radius scaled
+  by the sensor-coverage readback; only the seed and the reveal set
+  serialize, never the field (spec 014 §4).
 
 ## 6. Write paths
 

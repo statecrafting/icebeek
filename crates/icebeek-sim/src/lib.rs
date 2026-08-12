@@ -10,6 +10,7 @@ mod rng;
 mod save;
 mod state;
 mod view;
+mod world_field;
 
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{LogLevel, ScheduleBuildSettings, SingleThreadedExecutor};
@@ -22,10 +23,14 @@ pub use save::{Migration, SAVE_FORMAT_VERSION, SaveError};
 pub use state::{
     AMBIENT_C, AutomationRule, AutomationRules, COMPARTMENTS, Capability, CargoHold, Command,
     CommandQueue, Condition, Drone, DroneFleet, DroneKind, DroneZone, EngineCore, Equipment,
-    EventBus, ExpeditionState, HULL_NODES, Helm, HullGraph, OPERATING_C, Routing, RuleAction,
-    SHUTDOWN_LADDER, ShipKinetics, ShipSystem, SimTick, ThermalField, WeatherState, WorldDomain,
+    EventBus, ExpeditionState, FogOfWinter, HULL_NODES, Helm, HullGraph, OPERATING_C, Routing,
+    RuleAction, SHUTDOWN_LADDER, ShipKinetics, ShipSystem, SimTick, ThermalField, WeatherState,
+    WorldDomain,
 };
-pub use view::{SimSnapshot, SimSnapshots};
+pub use view::{SimSnapshot, SimSnapshots, TERRAIN_VIEW_SIDE, TerrainView};
+pub use world_field::{
+    CELL_UNITS, IceClass, IceClassProfile, cell_center, cell_of, class_at, class_of_cell, profile,
+};
 
 use icebeek_events::{EventPayload, ExpeditionEvent, ResourceKind, WeatherEvent};
 
@@ -124,6 +129,9 @@ const CRUSH_STRESS_SCALE: f32 = 0.02;
 const WARNING_CHANCE_PER_SECOND: f32 = 0.1;
 /// Ticks between rover hauls while anchored.
 const HAUL_TICKS: u32 = 40;
+/// Reveal radius of the Fog of Winter at full sensor coverage, in
+/// world cells (spec 014 section 4). Balancing placeholder.
+const REVEAL_RADIUS_CELLS: f32 = 6.0;
 
 /// The four phases of a tick, in their fixed total order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,7 +209,10 @@ impl SimWorld {
         world.insert_resource(AutomationRules::default());
         world.insert_resource(Routing::default());
         world.insert_resource(Equipment::default());
-        world.insert_resource(WorldDomain::default());
+        world.insert_resource(WorldDomain {
+            map_seed: seed,
+            ..WorldDomain::default()
+        });
         world.insert_resource(CargoHold::starting_provisions());
         world.insert_resource(Capability::default());
         world.insert_resource(SimRng::from_seed(seed));
@@ -219,6 +230,7 @@ impl SimWorld {
                 (
                     mark_world,
                     drive_kinetics,
+                    reveal_terrain,
                     generate_ice_events,
                     generate_weather,
                     run_expedition,
@@ -290,6 +302,17 @@ impl SimWorld {
         let helm = self.world.resource::<Helm>();
         let engine = self.world.resource::<EngineCore>();
         let domain = self.world.resource::<WorldDomain>();
+        let center = world_field::cell_of(kinetics.position);
+        let half = TERRAIN_VIEW_SIDE as i64 / 2;
+        let mut classes = Vec::with_capacity(TERRAIN_VIEW_SIDE * TERRAIN_VIEW_SIDE);
+        let mut revealed = Vec::with_capacity(TERRAIN_VIEW_SIDE * TERRAIN_VIEW_SIDE);
+        for dy in -half..=half {
+            for dx in -half..=half {
+                let cell = (center.0 + dx, center.1 + dy);
+                classes.push(world_field::class_of_cell(domain.map_seed, cell));
+                revealed.push(domain.fog.is_revealed(cell));
+            }
+        }
         SimSnapshot {
             tick: self.world.resource::<SimTick>().0,
             position: kinetics.position,
@@ -306,7 +329,20 @@ impl SimWorld {
             site_available: domain.expedition.site_available,
             anchored_at_site: domain.expedition.anchored_at_site,
             crush_pressure: domain.expedition.crush_pressure,
+            terrain: TerrainView {
+                center,
+                side: TERRAIN_VIEW_SIDE,
+                classes,
+                revealed,
+            },
         }
+    }
+
+    /// Read-only sensing over the ice field (spec 014 section 2): a
+    /// pure lookup in (map seed, position) that touches no RNG and no
+    /// state, however often it is called.
+    pub fn ice_class_at(&self, position: [f64; 2]) -> IceClass {
+        world_field::class_at(self.world.resource::<WorldDomain>().map_seed, position)
     }
 
     pub fn last_trace(&self) -> &TickTrace {
@@ -447,56 +483,113 @@ fn apply_commands(
 }
 
 /// World phase: gross motion, capped by the capability the interior
-/// reported last tick (spec 002 section 3 rule 3). Mass sets torque,
-/// torque sets fuel demand (spec 005 section 5); the interior burns
-/// against that demand in the same tick.
+/// reported last tick (spec 002 section 3 rule 3) and priced by the
+/// ice class under the prow (spec 014 section 3): break resistance
+/// cuts speed at a given thrust, the fuel cost factor multiplies
+/// torque while breaking, and prow wear accrues per world unit
+/// broken through. Mass sets torque, torque sets fuel demand (spec
+/// 005 section 5); the interior burns against that demand in the
+/// same tick.
 fn drive_kinetics(
     mut kinetics: ResMut<ShipKinetics>,
     helm: Res<Helm>,
     capability: Res<Capability>,
     cargo: Res<CargoHold>,
+    domain: Res<WorldDomain>,
 ) {
+    let profile = world_field::profile(world_field::class_at(domain.map_seed, kinetics.position));
     let speed = if helm.anchor_ordered {
         0.0
     } else {
-        helm.throttle.min(capability.available_thrust) * MAX_SPEED
+        helm.throttle.min(capability.available_thrust)
+            * MAX_SPEED
+            * (1.0 - profile.break_resistance)
     };
     kinetics.speed = speed;
     let cargo_units: u64 = cargo.amounts.iter().sum();
     kinetics.total_mass = BASE_MASS + cargo_units as f32 * CARGO_UNIT_MASS;
-    kinetics.torque_demand = kinetics.total_mass * speed / (BASE_MASS * MAX_SPEED);
+    kinetics.torque_demand =
+        kinetics.total_mass * speed / (BASE_MASS * MAX_SPEED) * profile.fuel_cost_factor;
     kinetics.fuel_burn = IDLE_BURN_PER_SECOND + TORQUE_BURN_PER_SECOND * kinetics.torque_demand;
     let step = f64::from(speed) * f64::from(TICK_SECONDS);
+    kinetics.prow_wear = (kinetics.prow_wear + profile.prow_wear_per_unit * step as f32).min(1.0);
     kinetics.position[0] += f64::from(helm.heading_rad.cos()) * step;
     kinetics.position[1] += f64::from(helm.heading_rad.sin()) * step;
 }
 
+/// World phase: the Fog of Winter (spec 014 section 4). The reveal
+/// set only ever grows, in deterministic cell order, from the ship's
+/// cell with a radius scaled by last tick's sensor-coverage
+/// readback: zero coverage halts growth and erases nothing. No RNG.
+fn reveal_terrain(
+    kinetics: Res<ShipKinetics>,
+    capability: Res<Capability>,
+    mut domain: ResMut<WorldDomain>,
+) {
+    let radius = REVEAL_RADIUS_CELLS * capability.sensor_coverage;
+    if radius <= 0.0 {
+        return;
+    }
+    let center = world_field::cell_of(kinetics.position);
+    let reach = radius.floor() as i64;
+    let radius_sq = f64::from(radius) * f64::from(radius);
+    for dy in -reach..=reach {
+        for dx in -reach..=reach {
+            if (dx * dx + dy * dy) as f64 <= radius_sq {
+                domain.fog.revealed.insert((center.0 + dx, center.1 + dy));
+            }
+        }
+    }
+}
+
 /// World phase: the event generator, the only RNG consumer in the
-/// simulation (spec 010 section 4 rule 4).
+/// simulation (spec 010 section 4 rule 4). The ice class under the
+/// prow sets the stress event profile and the yield mix and rate
+/// (spec 014 section 3); the field lookup itself draws nothing from
+/// the RNG.
 fn generate_ice_events(
     tick: Res<SimTick>,
     kinetics: Res<ShipKinetics>,
     capability: Res<Capability>,
+    domain: Res<WorldDomain>,
     mut rng: ResMut<SimRng>,
     mut bus: ResMut<EventBus>,
 ) {
     if kinetics.speed <= 0.0 {
         return;
     }
+    let profile = world_field::profile(world_field::class_at(domain.map_seed, kinetics.position));
     let intensity = kinetics.speed / MAX_SPEED;
-    if rng.next_f32() < IMPACT_CHANCE_PER_SECOND * intensity * TICK_SECONDS {
+    let impact_chance =
+        IMPACT_CHANCE_PER_SECOND * profile.impact_chance_factor * intensity * TICK_SECONDS;
+    if rng.next_f32() < impact_chance {
         let node = rng.next_range(HULL_NODES as u32);
-        let magnitude = 0.05 + 0.20 * rng.next_f32();
+        let magnitude =
+            profile.impact_magnitude_base + profile.impact_magnitude_spread * rng.next_f32();
         bus.emit(tick.0, EventPayload::Impact { node, magnitude });
     }
     // Frozen intake valves cut yield: last tick's readback scales the
     // ingestion chance (spec 006 section 5, spec 002 section 3.3).
-    let ingest_chance =
-        INGEST_CHANCE_PER_SECOND * intensity * capability.intake_capacity * TICK_SECONDS;
+    let ingest_chance = INGEST_CHANCE_PER_SECOND
+        * profile.yield_rate
+        * intensity
+        * capability.intake_capacity
+        * TICK_SECONDS;
     if rng.next_f32() < ingest_chance {
-        let resource = ResourceKind::ALL[rng.next_range(ResourceKind::ALL.len() as u32) as usize];
-        let amount = 1 + rng.next_range(5);
-        bus.emit(tick.0, EventPayload::Ingestion { resource, amount });
+        let total: u32 = profile.yield_weights.iter().sum();
+        if total > 0 {
+            let mut draw = rng.next_range(total);
+            let mut resource = ResourceKind::ALL[0];
+            for (index, weight) in profile.yield_weights.iter().enumerate() {
+                if draw < *weight {
+                    resource = ResourceKind::ALL[index];
+                    break;
+                }
+                draw -= *weight;
+            }
+            let amount = 1 + rng.next_range(5);
+            bus.emit(tick.0, EventPayload::Ingestion { resource, amount });
+        }
     }
 }
 
@@ -1382,6 +1475,115 @@ mod tests {
         }
         let weather = &sim.world.resource::<WorldDomain>().weather;
         assert!(weather.storms_seen > 0, "no storm in 6000 ticks");
+    }
+
+    /// Spec 014 section 5 test 2: field lookups draw nothing from
+    /// the event RNG. Two identical runs, one sensing the field
+    /// heavily every tick: byte-identical end states.
+    #[test]
+    fn field_queries_never_perturb_the_event_stream() {
+        let mut plain = SimWorld::new(77);
+        let mut sensing = SimWorld::new(77);
+        for sim in [&mut plain, &mut sensing] {
+            sim.push_command(Command::SetThrottle { throttle: 1.0 });
+        }
+        for t in 0..150 {
+            plain.tick();
+            sensing.tick();
+            for probe in 0..40 {
+                let position = [f64::from(t) * 3.0, f64::from(probe) * 5.0];
+                let _ = sensing.ice_class_at(position);
+            }
+        }
+        assert_eq!(plain.save_bytes(), sensing.save_bytes());
+    }
+
+    /// Spec 014 section 5 test 3: reveal is monotonic, and zero
+    /// sensor coverage halts growth without erasing the map.
+    #[test]
+    fn fog_reveal_is_monotonic_and_halts_without_sensors() {
+        let mut sim = SimWorld::new(71);
+        sim.push_command(Command::SetThrottle { throttle: 1.0 });
+        let mut last = 0usize;
+        for _ in 0..200 {
+            sim.tick();
+            let revealed = &sim.world().resource::<WorldDomain>().fog.revealed;
+            assert!(revealed.len() >= last, "the revealed set shrank");
+            last = revealed.len();
+        }
+        assert!(last > 0, "nothing was revealed under way");
+        // Freeze every sensor: the coverage readback drops to zero,
+        // growth halts, and the map is not erased. The capability
+        // lag means the tick after the freeze still reveals, so the
+        // baseline is captured after it.
+        sim.world.resource_mut::<Equipment>().sensor_frozen = [u32::MAX; HULL_NODES];
+        sim.tick();
+        let frozen = sim.world().resource::<WorldDomain>().fog.revealed.clone();
+        assert!(!frozen.is_empty(), "zero coverage erased the map");
+        for _ in 0..50 {
+            sim.tick();
+            assert_eq!(
+                sim.world().resource::<WorldDomain>().fog.revealed,
+                frozen,
+                "reveal state changed with zero sensor coverage"
+            );
+        }
+    }
+
+    /// Spec 014 section 5 test 4: crossing from pancake into pack
+    /// ice raises measured fuel burn and impact stress in the
+    /// profiled direction, and breaking ice wears the prow.
+    #[test]
+    fn class_profiles_price_the_crossing() {
+        let seed = 5;
+        let find = |wanted: IceClass| -> (i64, i64) {
+            for y in -200..200 {
+                for x in -200..200 {
+                    if class_of_cell(seed, (x, y)) == wanted {
+                        return (x, y);
+                    }
+                }
+            }
+            panic!("no {wanted:?} cell in the search window");
+        };
+        let pancake = find(IceClass::PancakeIce);
+        let pack = find(IceClass::PackIce);
+
+        let burn_in = |cell: (i64, i64)| -> f32 {
+            let mut sim = SimWorld::new(seed);
+            sim.push_command(Command::SetThrottle { throttle: 1.0 });
+            sim.world.resource_mut::<ShipKinetics>().position = cell_center(cell);
+            sim.tick();
+            sim.world().resource::<ShipKinetics>().fuel_burn
+        };
+        assert!(
+            burn_in(pack) > burn_in(pancake),
+            "pack ice should burn more fuel per second than pancake"
+        );
+
+        let stress_in = |cell: (i64, i64)| -> (f32, f32) {
+            let mut sim = SimWorld::new(seed);
+            sim.push_command(Command::SetThrottle { throttle: 1.0 });
+            sim.world.resource_mut::<DroneFleet>().drones.clear();
+            for _ in 0..600 {
+                // Pin the ship inside the class under test each tick.
+                sim.world.resource_mut::<ShipKinetics>().position = cell_center(cell);
+                sim.tick();
+            }
+            let stress: f32 = sim.world().resource::<HullGraph>().stress.iter().sum();
+            (stress, sim.world().resource::<ShipKinetics>().prow_wear)
+        };
+        let (pancake_stress, pancake_wear) = stress_in(pancake);
+        let (pack_stress, pack_wear) = stress_in(pack);
+        assert!(
+            pack_stress > pancake_stress,
+            "pack ice should stress the hull more ({pack_stress} vs {pancake_stress})"
+        );
+        assert!(
+            pack_wear > pancake_wear,
+            "heavier ice should wear the prow faster"
+        );
+        assert!(pancake_wear > 0.0, "breaking ice should wear the prow");
     }
 
     /// An overheating core draws melted intake ice as coolant: the

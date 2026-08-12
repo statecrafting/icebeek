@@ -89,13 +89,15 @@ review; approved specs are settled authority.
 | 18 | `017-save-versioning` | approved (2026-08-11) |
 
 Next pending: the growth ring 014 through 017 passed its human
-checkpoint on 2026-08-11; 017 (save versioning) is implemented, so
-every save now travels in the versioned envelope and every
-schema-visible change rides a format bump under its policy.
-Implementation continues in the recorded order: 014 (world content)
-next, then 015 (interior grid, whose section 7 rebase 017 has now
-unblocked), then 016 (tech tiers, which also amends spec 011 with
-the Salvage family).
+checkpoint on 2026-08-11; 017 (save versioning) and 014 (world
+content) are implemented. Saves travel in the versioned envelope
+(format v2 after 014's bump for the map seed, Fog of Winter, and
+prow wear), the ice field derives on demand from the map seed, and
+the exterior draws topography and fog from the snapshot's terrain
+window. Implementation continues in the recorded order: 015
+(interior grid, whose section 7 rebase 017 has unblocked) next, then
+016 (tech tiers, which also amends spec 011 with the Salvage
+family).
 
 ## Available Agents
 

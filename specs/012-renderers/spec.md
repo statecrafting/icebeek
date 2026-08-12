@@ -78,7 +78,10 @@ events. Isometric 3D. Its audio palette is the exterior one: wind,
 grinding ice, hull groans. It presents the Fog of Winter from the
 world domain's reveal state (spec 006 §2) and may observe the event
 queue to drive effects (an impact flash at the struck node), but the
-queue remains sim-owned (spec 011).
+queue remains sim-owned (spec 011). Terrain and fog reach it only
+through the snapshot's terrain window (spec 014 §4): the exterior
+paints unrevealed cells as fog and never derives the ice field
+itself.
 
 ## 4. The interior renderer (the Micro)
 
