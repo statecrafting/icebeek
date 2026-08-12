@@ -19,7 +19,7 @@ use crate::{SaveState, TICK_HZ};
 /// changes (spec 011 section 6), increments this by one and either
 /// appends the matching step to `MIGRATIONS` or states in the bump
 /// PR that older saves are now refused (spec 017 section 4).
-pub const SAVE_FORMAT_VERSION: u32 = 2;
+pub const SAVE_FORMAT_VERSION: u32 = 3;
 
 /// Typed load refusals (spec 017 section 3). Every branch names the
 /// versions involved; no load path panics or partially applies.
@@ -93,10 +93,16 @@ pub struct Migration {
 }
 
 /// The authored chain, one step per released format bump.
-static MIGRATIONS: &[Migration] = &[Migration {
-    from: 1,
-    run: migrate_v1_to_v2,
-}];
+static MIGRATIONS: &[Migration] = &[
+    Migration {
+        from: 1,
+        run: migrate_v1_to_v2,
+    },
+    Migration {
+        from: 2,
+        run: migrate_v2_to_v3,
+    },
+];
 
 /// v1 to v2 (spec 014, world content): the world domain gains
 /// `map_seed` and the Fog of Winter reveal set, and ship kinetics
@@ -120,6 +126,109 @@ fn migrate_v1_to_v2(mut envelope: Value) -> Result<Value, String> {
         .and_then(Value::as_object_mut)
         .ok_or("v1 save has no kinetics domain")?;
     kinetics.insert("prow_wear".into(), 0.0f32.into());
+    Ok(envelope)
+}
+
+/// v2 to v3 (spec 015, the interior grid): the bootstrap compartment
+/// ring retires and its state rebases onto the grid (spec 015
+/// section 7). The 8 compartment temperatures expand column-wise
+/// into the 16x8 cell field (every cell of a node's column band
+/// starts at its old compartment temperature); the 8-node valve and
+/// sensor banks expand to one unit per hull-row column; drone zones
+/// convert from hull-node ranges to the equivalent cell-column
+/// ranges; and the grid domain itself is synthesized at its
+/// fresh-run default (the pre-placed engine core, no player rooms,
+/// an empty spine). Gameplay-visible consequence: a migrated run's
+/// interior starts unbuilt, exactly like a fresh run's.
+fn migrate_v2_to_v3(mut envelope: Value) -> Result<Value, String> {
+    // Frozen v2 geometry: 8 hull nodes, a 16x8 cell grid, two
+    // columns per node band. Never re-derive these from live code.
+    const NODES: usize = 8;
+    const W: usize = 16;
+    const H: usize = 8;
+
+    let payload = envelope
+        .get_mut("payload")
+        .ok_or("v2 save has no payload")?;
+
+    let thermal = payload
+        .get_mut("thermal")
+        .and_then(Value::as_object_mut)
+        .ok_or("v2 save has no thermal domain")?;
+    let ring: Vec<f64> = thermal
+        .get("temps")
+        .and_then(Value::as_array)
+        .filter(|temps| temps.len() == NODES)
+        .map(|temps| temps.iter().filter_map(Value::as_f64).collect())
+        .ok_or("v2 thermal field is not an 8-compartment ring")?;
+    if ring.len() != NODES {
+        return Err("v2 thermal ring holds a non-number".into());
+    }
+    let mut cells = Vec::with_capacity(W * H);
+    for _y in 0..H {
+        for x in 0..W {
+            cells.push(Value::from(ring[x * NODES / W]));
+        }
+    }
+    thermal.insert("temps".into(), Value::Array(cells));
+
+    let equipment = payload
+        .get_mut("equipment")
+        .and_then(Value::as_object_mut)
+        .ok_or("v2 save has no equipment domain")?;
+    for bank in ["valve_frozen", "sensor_frozen"] {
+        let nodes: Vec<Value> = equipment
+            .get(bank)
+            .and_then(Value::as_array)
+            .filter(|entries| entries.len() == NODES)
+            .cloned()
+            .ok_or("v2 equipment bank is not 8 nodes wide")?;
+        let columns: Vec<Value> = (0..W).map(|x| nodes[x * NODES / W].clone()).collect();
+        equipment.insert(bank.into(), Value::Array(columns));
+    }
+
+    let drones = payload
+        .get_mut("drones")
+        .and_then(|fleet| fleet.get_mut("drones"))
+        .and_then(Value::as_array_mut)
+        .ok_or("v2 save has no drone fleet")?;
+    for drone in drones {
+        let zone = drone
+            .get_mut("zone")
+            .and_then(Value::as_object_mut)
+            .ok_or("v2 drone has no zone")?;
+        let from = zone
+            .get("from")
+            .and_then(Value::as_u64)
+            .ok_or("v2 zone has no from")?;
+        let to = zone
+            .get("to")
+            .and_then(Value::as_u64)
+            .ok_or("v2 zone has no to")?;
+        let scale = (W / NODES) as u64;
+        zone.insert("from".into(), (from * scale).into());
+        zone.insert("to".into(), (to * scale + scale - 1).into());
+    }
+
+    let payload = payload
+        .as_object_mut()
+        .ok_or("v2 payload is not an object")?;
+    payload.insert(
+        "grid".into(),
+        serde_json::json!({
+            "rooms": [{
+                "id": 0,
+                "kind": "EngineCore",
+                "origin": { "deck": 0, "x": 7, "y": 3 },
+                "input_buffer": 0,
+                "output_buffer": 0
+            }],
+            "next_room_id": 1,
+            "edges": [],
+            "next_edge_id": 0,
+            "hull_node_of_column": [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7]
+        }),
+    );
     Ok(envelope)
 }
 
@@ -241,6 +350,7 @@ mod tests {
     const FIXTURES: &[(u32, &str)] = &[
         (1, include_str!("../fixtures/format-v1.json")),
         (2, include_str!("../fixtures/format-v2.json")),
+        (3, include_str!("../fixtures/format-v3.json")),
     ];
 
     /// A deterministic scripted run rich enough that every domain
@@ -431,7 +541,12 @@ mod tests {
     /// chain migrates and then loads through the normal cascade.
     #[test]
     fn migrated_save_loads_end_to_end() {
-        let bytes = fixture_run().save_bytes();
+        // Claim version 1 so the synthetic chain actually walks; its
+        // steps only stamp diagnostics, so the current-format payload
+        // still decodes at the end.
+        let mut envelope = current_envelope();
+        envelope["format_version"] = 1.into();
+        let bytes = serde_json::to_vec(&envelope).unwrap();
         let state = decode_with(&bytes, SYNTHETIC, 3).expect("older save migrates and loads");
         assert_eq!(state.tick.0, 240);
     }
