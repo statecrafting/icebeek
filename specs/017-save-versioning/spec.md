@@ -1,7 +1,7 @@
 ---
 id: "017-save-versioning"
 title: "Save versioning: the envelope, migration chains, refusal"
-status: draft
+status: approved
 created: "2026-08-11"
 depends_on:
   - "008-simulation-substrate"

@@ -83,20 +83,18 @@ review; approved specs are settled authority.
 | 12 | `011-event-bus` | approved (2026-08-11) |
 | 13 | `012-renderers` | approved (2026-08-11) |
 | 14 | `013-ci` | approved (2026-08-11) |
-| 15 | `014-world-content` | draft (2026-08-11): pending human review |
-| 16 | `015-interior-grid` | draft (2026-08-11): pending human review |
-| 17 | `016-tech-tiers` | draft (2026-08-11): pending human review |
-| 18 | `017-save-versioning` | draft (2026-08-11): pending human review |
+| 15 | `014-world-content` | approved (2026-08-11) |
+| 16 | `015-interior-grid` | approved (2026-08-11) |
+| 17 | `016-tech-tiers` | approved (2026-08-11) |
+| 18 | `017-save-versioning` | approved (2026-08-11) |
 
-Next pending: the vertical slice is complete end to end (all four
-event families resolve through every sim phase; both renderers draw
-first visuals over the snapshot read API; the app captures input
-into typed commands). Specs 014 through 017 are drafted as the next
-growth ring and await human review: THE CHECKPOINT IS APPROVAL.
-No implementation work for 014 through 017 may start while they are
-drafts. Suggested review order is backlog order; 017 (save
-versioning) is a prerequisite for the save-breaking grid rebase
-that 015 section 7 queues.
+Next pending: the growth ring 014 through 017 passed its human
+checkpoint on 2026-08-11 (approval recorded by direction of the
+repository owner) and implementation work re-opens. Implementation
+order is 017 first, then 014, 015, 016: every remaining spec makes
+save-schema-visible changes, so the spec 017 envelope and migration
+policy must land before any of them, and 015 section 7 explicitly
+sequences its save-breaking grid rebase after 017 is implemented.
 
 ## Available Agents
 

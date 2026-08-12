@@ -29,8 +29,8 @@
       }
     ],
     "specId": "016-tech-tiers",
-    "specStatus": "draft"
+    "specStatus": "approved"
   },
   "schemaVersion": "1.1.0",
-  "shardHash": "1cbef191119d9aba9bb2c1eb0b3e7711976df2cf8f8c2d1cc4f5273a5583dbd2"
+  "shardHash": "8c7b276b518e1bdd5e3092750cc279024c95e27d8fdbc8e0143ac8dd663173df"
 }

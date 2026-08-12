@@ -27,8 +27,8 @@
       }
     ],
     "specId": "017-save-versioning",
-    "specStatus": "draft"
+    "specStatus": "approved"
   },
   "schemaVersion": "1.1.0",
-  "shardHash": "60fc479ce34ae48acc0c4b0a225dc9d9c6b82d973820f631d491907c3ab6a9e7"
+  "shardHash": "f8763011ad277879f06da8c59f104d490ba6b6ece2558673f0b1a9f2eb1130e3"
 }

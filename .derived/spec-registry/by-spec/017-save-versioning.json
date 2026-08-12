@@ -23,10 +23,10 @@
       "6. Out of scope"
     ],
     "specPath": "specs/017-save-versioning/spec.md",
-    "status": "draft",
+    "status": "approved",
     "summary": "The policy spec 010 section 7 deferred: a versioned save envelope (format version, crate version, TICK_HZ) wrapping the state payload; a compatibility rule of load-same, migrate-older-when-a-chain-exists, refuse-newer, refuse-unknown, always with a typed error naming the versions; and migration as a chain of pure, total, deterministic functions from version N to N+1, exercised against committed golden fixture saves. The event schema is save surface (spec 011 section 6), so variant renames and removals ride format bumps here instead of breaking silently. Until a migration is authored, a bump refuses old saves loudly; corrupting or reinterpreting them is never an option.\n",
     "title": "Save versioning: the envelope, migration chains, refusal"
   },
-  "shardHash": "49540b378dcbadce472f8939b12a4ee146da7f5ba9c6fcf9df8fd3447400e08a",
+  "shardHash": "564e818947745cdb459b969e8ed0b7c1c74cf17bf0321bb16e2227b1d3f879f4",
   "specVersion": "1.1.0"
 }

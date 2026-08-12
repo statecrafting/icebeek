@@ -1,7 +1,7 @@
 ---
 id: "016-tech-tiers"
 title: "Tech mechanisms: research accrual, blueprints, tier gates"
-status: draft
+status: approved
 created: "2026-08-11"
 depends_on:
   - "003-core-gameplay-loop"

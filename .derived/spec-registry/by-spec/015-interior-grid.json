@@ -26,10 +26,10 @@
       "8. Out of scope"
     ],
     "specPath": "specs/015-interior-grid/spec.md",
-    "status": "draft",
+    "status": "approved",
     "summary": "The mechanism spec for the interior grid domain (spec 010 section 5, spec 004 section 4): a per-deck cell grid with strictly finite hull space, room modules placed onto cell footprints, and the logistics spine (belts, pipes, data lines) as typed edges between them. Build, tear-out, and re-route are typed player commands validated deterministically in the commands phase; refit refunds a fixed fraction of materials, making refactoring an expected activity rather than a penalty. Rooms carry mass (the spec 005 efficiency tax), heat behavior (the thermal field migrates from the bootstrap compartment ring onto the grid), and machine buffers. Breaches disable cells, and cascades follow the spine topology, so over-provisioning is an engineering decision the grid makes legible.\n",
     "title": "The buildable interior grid: rooms, the spine, refit"
   },
-  "shardHash": "dc8bd087c045f1ec2095835acc56ef70e934ff939dffce7a81202a4ab8ab5d93",
+  "shardHash": "646e3ccf41d7f984116c4ff29a745d040c11600a84ed8a25951ca32f6c47d816",
   "specVersion": "1.1.0"
 }

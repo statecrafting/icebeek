@@ -26,10 +26,10 @@
       "7. Out of scope"
     ],
     "specPath": "specs/016-tech-tiers/spec.md",
-    "status": "draft",
+    "status": "approved",
     "summary": "The mechanism spec for the tech domain (spec 010 section 5, spec 007): research accrues only from processing ingested ancient technology through a Refinery, never passively; tier-gating blueprints arrive from the world as a new Salvage event family (wreck salvage from pack ice, wall caches from glacial breaches, node vaults from expeditions), making major progression a Macro risk decision per spec 007 section 4. Tier state gates what the interior may build and what the prow may mount, and a tier transition deliberately re-prices heat and fuel so prior layouts obsolesce (the paradigm rule of spec 007 section 2). Adding the Salvage family is an explicit spec 011 amendment carried by this spec's implementation PR.\n",
     "title": "Tech mechanisms: research accrual, blueprints, tier gates"
   },
-  "shardHash": "3a2204f3d53ef464b44a483940d8fb5a5d307a08a8ebc857a8ce5431f539f3a0",
+  "shardHash": "7cb844962f606539e9f0c37c59f58c24574e4c15e041705588c9c4d46981b53f",
   "specVersion": "1.1.0"
 }

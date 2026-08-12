@@ -28,8 +28,8 @@
       }
     ],
     "specId": "015-interior-grid",
-    "specStatus": "draft"
+    "specStatus": "approved"
   },
   "schemaVersion": "1.1.0",
-  "shardHash": "089ed8cd80024a25720efe35adbc741fbd86f8c4f719c7db1e043473a9b90fbb"
+  "shardHash": "4598f8e03ed3a9be2a5eeae00c00ed42449765b9c6759d8a63ae24f393d68881"
 }
