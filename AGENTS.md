@@ -88,15 +88,17 @@ review; approved specs are settled authority.
 | 17 | `016-tech-tiers` | approved (2026-08-11) |
 | 18 | `017-save-versioning` | approved (2026-08-11) |
 
-Next pending: the growth ring 014 through 017 passed its human
-checkpoint on 2026-08-11; 017 (save versioning), 014 (world
-content), and 015 (interior grid) are implemented. Saves are at
-format v3: the bootstrap compartment ring is retired, thermal state
-is per grid cell, equipment and drone zones live on cell columns,
-and the buildable grid (rooms, spine, refit, breach cascades) is in
-the sim with its migration chain exercised against the frozen v1 and
-v2 fixtures. One spec remains: 016 (tech tiers), which also amends
-spec 011 with the Salvage event family.
+Next pending: none. The growth ring 014 through 017 is fully
+implemented: the save envelope and migration chains, the ice field
+and Fog of Winter, the buildable interior grid, and the tech
+mechanisms with the Salvage family amendment to spec 011. Saves are
+at format v4 with a three-step migration chain exercised against the
+frozen v1 through v3 golden fixtures. The backlog is empty: the next
+growth ring is a fresh drafting exercise (balancing data, the rule
+language surface over data lines, the build UI, and the replay
+format are the queued candidates across the 014 through 017
+out-of-scope lists), and drafting it is a human-checkpointed corpus
+change like PR #12 was.
 
 ## Available Agents
 

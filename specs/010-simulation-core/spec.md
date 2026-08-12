@@ -175,6 +175,16 @@ field latitude, so they are pinned here:
   derives from hull stress through the stored cell-to-node mapping,
   disabling a breached cell's rooms and severing its edges so
   cascade reach follows spine topology (spec 015 §4).
+- **Tech resolution.** Research accrues only when a working Refinery
+  processes AncientTech from cargo, metered in whole units, in the
+  interior phase (spec 016 §2): no passive trickle, no wall clock.
+  Salvage events resolve into the tech domain's sorted blueprint
+  set; a duplicate find converts to research and the set never
+  double-counts (spec 016 §3). Tier gates reject orders in the
+  commands phase like invalid build orders, and a tier advancement
+  swaps the whole paradigm profile on its own tick: every consumer
+  derives the profile from the tier, so no tick observes a mixed
+  profile (spec 016 §§4-5).
 - **World field and reveal.** The ice field is a pure function of
   (map seed, position), computed on demand through seed-keyed
   hashing; field lookups draw nothing from the event RNG, so

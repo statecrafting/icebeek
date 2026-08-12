@@ -91,6 +91,9 @@ pub struct RoomSpec {
     pub build_cost: [u64; 4],
     /// Capacity of each machine buffer (input and output).
     pub buffer_capacity: u32,
+    /// The tech tier that unlocks placing this room (spec 016
+    /// section 4).
+    pub min_tier: u8,
 }
 
 const ENGINE_CORE: RoomSpec = RoomSpec {
@@ -101,6 +104,7 @@ const ENGINE_CORE: RoomSpec = RoomSpec {
     heat_per_second: 0.0,
     build_cost: [0, 0, 0, 0],
     buffer_capacity: 0,
+    min_tier: 1,
 };
 const FOUNDRY: RoomSpec = RoomSpec {
     footprint: (2, 2),
@@ -108,6 +112,7 @@ const FOUNDRY: RoomSpec = RoomSpec {
     heat_per_second: 25.0,
     build_cost: [20, 0, 0, 0],
     buffer_capacity: 8,
+    min_tier: 1,
 };
 const REFINERY: RoomSpec = RoomSpec {
     footprint: (2, 2),
@@ -115,6 +120,7 @@ const REFINERY: RoomSpec = RoomSpec {
     heat_per_second: 20.0,
     build_cost: [15, 5, 0, 0],
     buffer_capacity: 8,
+    min_tier: 1,
 };
 const FABRICATOR: RoomSpec = RoomSpec {
     footprint: (2, 2),
@@ -122,6 +128,7 @@ const FABRICATOR: RoomSpec = RoomSpec {
     heat_per_second: 15.0,
     build_cost: [15, 0, 0, 0],
     buffer_capacity: 8,
+    min_tier: 2,
 };
 const HYDROPONICS: RoomSpec = RoomSpec {
     footprint: (2, 2),
@@ -129,6 +136,7 @@ const HYDROPONICS: RoomSpec = RoomSpec {
     heat_per_second: 5.0,
     build_cost: [10, 0, 10, 0],
     buffer_capacity: 8,
+    min_tier: 2,
 };
 const DRONE_BAY: RoomSpec = RoomSpec {
     footprint: (2, 2),
@@ -136,6 +144,7 @@ const DRONE_BAY: RoomSpec = RoomSpec {
     heat_per_second: 10.0,
     build_cost: [15, 0, 0, 0],
     buffer_capacity: 4,
+    min_tier: 1,
 };
 const HEAT_SINK: RoomSpec = RoomSpec {
     footprint: (1, 1),
@@ -143,6 +152,7 @@ const HEAT_SINK: RoomSpec = RoomSpec {
     heat_per_second: -30.0,
     build_cost: [8, 0, 0, 0],
     buffer_capacity: 0,
+    min_tier: 1,
 };
 const STORAGE: RoomSpec = RoomSpec {
     footprint: (2, 2),
@@ -150,6 +160,7 @@ const STORAGE: RoomSpec = RoomSpec {
     heat_per_second: 0.0,
     build_cost: [10, 0, 0, 0],
     buffer_capacity: 12,
+    min_tier: 1,
 };
 const STRUT: RoomSpec = RoomSpec {
     footprint: (1, 1),
@@ -157,6 +168,7 @@ const STRUT: RoomSpec = RoomSpec {
     heat_per_second: 0.0,
     build_cost: [2, 0, 0, 0],
     buffer_capacity: 0,
+    min_tier: 1,
 };
 
 /// The room table (spec 015 section 3), exhaustive by construction:
@@ -248,6 +260,11 @@ pub enum RejectReason {
     UnknownEdge,
     NotAdjacent,
     DuplicateEdge,
+    /// The order needs a higher tech tier (spec 016 section 4).
+    TierGated,
+    /// Tier advancement needs its blueprint set complete first (spec
+    /// 016 section 3).
+    IncompleteBlueprints,
 }
 
 /// A dropped order and its reason.

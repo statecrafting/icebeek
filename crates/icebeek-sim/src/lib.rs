@@ -10,6 +10,7 @@ mod grid;
 mod rng;
 mod save;
 mod state;
+mod tech;
 mod view;
 mod world_field;
 
@@ -28,15 +29,20 @@ pub use save::{Migration, SAVE_FORMAT_VERSION, SaveError};
 pub use state::{
     AMBIENT_C, AutomationRule, AutomationRules, Capability, CargoHold, Command, CommandQueue,
     Condition, Drone, DroneFleet, DroneKind, DroneZone, EngineCore, Equipment, EventBus,
-    ExpeditionState, FogOfWinter, HULL_NODES, Helm, HullGraph, OPERATING_C, Routing, RuleAction,
-    SHUTDOWN_LADDER, ShipKinetics, ShipSystem, SimTick, ThermalField, WeatherState, WorldDomain,
+    ExpeditionState, FogOfWinter, HULL_NODES, Helm, HullGraph, OPERATING_C, ProwTrack, Routing,
+    RuleAction, SHUTDOWN_LADDER, ShipKinetics, ShipSystem, SimTick, ThermalField, WeatherState,
+    WorldDomain,
+};
+pub use tech::{
+    BLUEPRINT_POOL, DUPLICATE_BLUEPRINT_RESEARCH, MAX_TIER, RESEARCH_PER_TECH, TechDomain,
+    TierProfile, blueprints_required, research_cost, tier_profile,
 };
 pub use view::{SimSnapshot, SimSnapshots, TERRAIN_VIEW_SIDE, TerrainView};
 pub use world_field::{
     CELL_UNITS, IceClass, IceClassProfile, cell_center, cell_of, class_at, class_of_cell, profile,
 };
 
-use icebeek_events::{EventPayload, ExpeditionEvent, ResourceKind, WeatherEvent};
+use icebeek_events::{EventPayload, ExpeditionEvent, ResourceKind, SalvageEvent, WeatherEvent};
 
 /// Ticks per simulated second (spec 010 section 3). Amend spec 010 to
 /// tune; saves record the rate they were written under.
@@ -135,6 +141,14 @@ const HAUL_TICKS: u32 = 40;
 /// Reveal radius of the Fog of Winter at full sensor coverage, in
 /// world cells (spec 014 section 4). Balancing placeholder.
 const REVEAL_RADIUS_CELLS: f32 = 6.0;
+/// Per-second chance of a trapped-wreck blueprint find while
+/// breaking pack ice at full intensity (spec 016 section 3).
+const WRECK_SALVAGE_CHANCE_PER_SECOND: f32 = 0.02;
+/// Per-second chance of a wall-cache blueprint find while ramming a
+/// glacial wall at full intensity.
+const WALL_CACHE_CHANCE_PER_SECOND: f32 = 0.05;
+/// Chance one rover haul comes back carrying a vault blueprint.
+const NODE_VAULT_CHANCE: f32 = 0.15;
 
 /// The four phases of a tick, in their fixed total order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -179,6 +193,7 @@ pub struct SaveState {
     pub routing: Routing,
     pub equipment: Equipment,
     pub world: WorldDomain,
+    pub tech: TechDomain,
     pub cargo: CargoHold,
     pub capability: Capability,
     pub rng: SimRng,
@@ -218,6 +233,7 @@ impl SimWorld {
             map_seed: seed,
             ..WorldDomain::default()
         });
+        world.insert_resource(TechDomain::default());
         world.insert_resource(CargoHold::starting_provisions());
         world.insert_resource(Capability::default());
         world.insert_resource(SimRng::from_seed(seed));
@@ -250,6 +266,7 @@ impl SimWorld {
                     consume_events,
                     thaw_equipment,
                     run_spine,
+                    run_refineries,
                     feed_engine,
                     burn_fuel,
                     route_coolant,
@@ -372,6 +389,7 @@ impl SimWorld {
             routing: self.world.resource::<Routing>().clone(),
             equipment: self.world.resource::<Equipment>().clone(),
             world: self.world.resource::<WorldDomain>().clone(),
+            tech: self.world.resource::<TechDomain>().clone(),
             cargo: self.world.resource::<CargoHold>().clone(),
             capability: self.world.resource::<Capability>().clone(),
             rng: self.world.resource::<SimRng>().clone(),
@@ -398,6 +416,7 @@ impl SimWorld {
         world.insert_resource(save.routing);
         world.insert_resource(save.equipment);
         world.insert_resource(save.world);
+        world.insert_resource(save.tech);
         world.insert_resource(save.cargo);
         world.insert_resource(save.capability);
         world.insert_resource(save.rng);
@@ -465,6 +484,8 @@ fn apply_commands(
     mut equipment: ResMut<Equipment>,
     mut interior: ResMut<InteriorGrid>,
     mut cargo: ResMut<CargoHold>,
+    mut kinetics: ResMut<ShipKinetics>,
+    mut tech: ResMut<TechDomain>,
     mut build_log: ResMut<BuildLog>,
 ) {
     build_log.0.clear();
@@ -486,6 +507,16 @@ fn apply_commands(
                 }
             }
             Command::AddRule { condition, action } => {
+                // Rule vocabulary is tier-gated (spec 005 section 3
+                // tiers, spec 016 section 4).
+                if condition.min_tier() > tech.tier {
+                    reject(
+                        &mut build_log,
+                        Command::AddRule { condition, action },
+                        RejectReason::TierGated,
+                    );
+                    continue;
+                }
                 let id = rules.next_rule_id;
                 rules.next_rule_id += 1;
                 rules.rules.push(AutomationRule {
@@ -508,6 +539,16 @@ fn apply_commands(
             Command::PlaceRoom { kind, origin } => {
                 if let Some(reason) = interior.placement_rejection(kind, origin) {
                     reject(&mut build_log, Command::PlaceRoom { kind, origin }, reason);
+                    continue;
+                }
+                // The tier gate (spec 016 section 4): rejected like
+                // any invalid build order, no partial state.
+                if room_spec(kind).min_tier > tech.tier {
+                    reject(
+                        &mut build_log,
+                        Command::PlaceRoom { kind, origin },
+                        RejectReason::TierGated,
+                    );
                     continue;
                 }
                 let cost = room_spec(kind).build_cost;
@@ -580,6 +621,55 @@ fn apply_commands(
                     );
                 }
             }
+            Command::MountProwTrack { track } => {
+                if track.min_tier() > tech.tier {
+                    reject(
+                        &mut build_log,
+                        Command::MountProwTrack { track },
+                        RejectReason::TierGated,
+                    );
+                    continue;
+                }
+                kinetics.prow_track = track;
+            }
+            Command::AdvanceTier => {
+                let next = tech.tier + 1;
+                if next > tech::MAX_TIER {
+                    reject(
+                        &mut build_log,
+                        Command::AdvanceTier,
+                        RejectReason::TierGated,
+                    );
+                    continue;
+                }
+                // Tier N+1 requires its blueprint set complete plus
+                // the research spend (spec 016 section 3).
+                if !tech::blueprints_required(next)
+                    .iter()
+                    .all(|blueprint| tech.blueprints.contains(blueprint))
+                {
+                    reject(
+                        &mut build_log,
+                        Command::AdvanceTier,
+                        RejectReason::IncompleteBlueprints,
+                    );
+                    continue;
+                }
+                let cost = tech::research_cost(next);
+                if tech.research < cost {
+                    reject(
+                        &mut build_log,
+                        Command::AdvanceTier,
+                        RejectReason::Unaffordable,
+                    );
+                    continue;
+                }
+                // The whole paradigm profile applies from this tick:
+                // every consumer derives it from the tier, so no tick
+                // observes a mixed profile (spec 016 section 5).
+                tech.research -= cost;
+                tech.tier = next;
+            }
         }
     }
 }
@@ -599,6 +689,7 @@ fn drive_kinetics(
     cargo: Res<CargoHold>,
     interior: Res<InteriorGrid>,
     domain: Res<WorldDomain>,
+    tech: Res<TechDomain>,
 ) {
     let profile = world_field::profile(world_field::class_at(domain.map_seed, kinetics.position));
     let speed = if helm.anchor_ordered {
@@ -617,9 +708,14 @@ fn drive_kinetics(
     kinetics.total_mass = BASE_MASS + cargo_units as f32 * CARGO_UNIT_MASS + interior.room_mass();
     kinetics.torque_demand =
         kinetics.total_mass * speed / (BASE_MASS * MAX_SPEED) * profile.fuel_cost_factor;
-    kinetics.fuel_burn = IDLE_BURN_PER_SECOND + TORQUE_BURN_PER_SECOND * kinetics.torque_demand;
+    // The tier paradigm re-prices the whole burn line (spec 016
+    // section 5); the mounted track scales prow wear (spec 016
+    // section 4).
+    kinetics.fuel_burn = (IDLE_BURN_PER_SECOND + TORQUE_BURN_PER_SECOND * kinetics.torque_demand)
+        * tech.profile().fuel_burn_factor;
     let step = f64::from(speed) * f64::from(TICK_SECONDS);
-    kinetics.prow_wear = (kinetics.prow_wear + profile.prow_wear_per_unit * step as f32).min(1.0);
+    let wear_rate = profile.prow_wear_per_unit * kinetics.prow_track.wear_factor();
+    kinetics.prow_wear = (kinetics.prow_wear + wear_rate * step as f32).min(1.0);
     kinetics.position[0] += f64::from(helm.heading_rad.cos()) * step;
     kinetics.position[1] += f64::from(helm.heading_rad.sin()) * step;
 }
@@ -665,7 +761,8 @@ fn generate_ice_events(
     if kinetics.speed <= 0.0 {
         return;
     }
-    let profile = world_field::profile(world_field::class_at(domain.map_seed, kinetics.position));
+    let class = world_field::class_at(domain.map_seed, kinetics.position);
+    let profile = world_field::profile(class);
     let intensity = kinetics.speed / MAX_SPEED;
     let impact_chance =
         IMPACT_CHANCE_PER_SECOND * profile.impact_chance_factor * intensity * TICK_SECONDS;
@@ -697,6 +794,22 @@ fn generate_ice_events(
             let amount = 1 + rng.next_range(5);
             bus.emit(tick.0, EventPayload::Ingestion { resource, amount });
         }
+    }
+    // Blueprints come from the world (spec 016 section 3): trapped
+    // wrecks while breaking pack ice, caches while ramming glacial
+    // walls. Node vaults ride the expedition machine.
+    let salvage_chance = match class {
+        IceClass::PackIce => WRECK_SALVAGE_CHANCE_PER_SECOND,
+        IceClass::GlacialWall => WALL_CACHE_CHANCE_PER_SECOND,
+        _ => 0.0,
+    };
+    if salvage_chance > 0.0 && rng.next_f32() < salvage_chance * intensity * TICK_SECONDS {
+        let blueprint = 1 + rng.next_range(BLUEPRINT_POOL);
+        let payload = match class {
+            IceClass::GlacialWall => SalvageEvent::WallCache { blueprint },
+            _ => SalvageEvent::WreckSalvage { blueprint },
+        };
+        bus.emit(tick.0, EventPayload::Salvage(payload));
     }
 }
 
@@ -824,6 +937,15 @@ fn run_expedition(
                 amount: scrap,
             },
         );
+        // A haul may come back carrying an Iceberg Node vault
+        // blueprint (spec 016 section 3).
+        if rng.next_f32() < NODE_VAULT_CHANCE {
+            let blueprint = 1 + rng.next_range(BLUEPRINT_POOL);
+            bus.emit(
+                tick.0,
+                EventPayload::Salvage(SalvageEvent::NodeVault { blueprint }),
+            );
+        }
     }
 }
 
@@ -837,6 +959,7 @@ fn consume_events(
     mut cargo: ResMut<CargoHold>,
     mut equipment: ResMut<Equipment>,
     mut fleet: ResMut<DroneFleet>,
+    mut tech: ResMut<TechDomain>,
     interior: Res<InteriorGrid>,
 ) {
     let freeze_band = |bank: &mut [u32; GRID_W], node: u32| {
@@ -887,6 +1010,19 @@ fn consume_events(
                 | ExpeditionEvent::IceShiftWarning { .. }
                 | ExpeditionEvent::RoverReturn,
             ) => {}
+            EventPayload::Salvage(salvage) => {
+                let blueprint = match salvage {
+                    SalvageEvent::WreckSalvage { blueprint }
+                    | SalvageEvent::WallCache { blueprint }
+                    | SalvageEvent::NodeVault { blueprint } => blueprint,
+                };
+                // Blueprints are unique flags, never stock: a
+                // duplicate find converts to research and the set
+                // never double-counts (spec 016 section 3).
+                if !tech.blueprints.insert(blueprint) {
+                    tech.research += tech::DUPLICATE_BLUEPRINT_RESEARCH;
+                }
+            }
         }
     }
 }
@@ -912,7 +1048,8 @@ fn thaw_equipment(mut equipment: ResMut<Equipment>) {
 /// cascade reach follows spine topology. Data lines carry rule
 /// signals; their authoring surface is a future spec (spec 015
 /// section 8).
-fn run_spine(hull: Res<HullGraph>, mut interior: ResMut<InteriorGrid>) {
+fn run_spine(hull: Res<HullGraph>, tech: Res<TechDomain>, mut interior: ResMut<InteriorGrid>) {
+    let units_per_tick = tech.profile().belt_units_per_tick;
     for index in 0..interior.edges.len() {
         let edge = interior.edges[index].clone();
         if edge.kind == SpineKind::DataLine {
@@ -930,8 +1067,15 @@ fn run_spine(hull: Res<HullGraph>, mut interior: ResMut<InteriorGrid>) {
         if src == dst {
             continue;
         }
-        let capacity = interior.rooms[dst].spec().buffer_capacity;
-        if interior.rooms[src].output_buffer > 0 && interior.rooms[dst].input_buffer < capacity {
+        // The paradigm's throughput (spec 016 section 5), still
+        // whole units, still back-pressured.
+        for _ in 0..units_per_tick {
+            let capacity = interior.rooms[dst].spec().buffer_capacity;
+            if interior.rooms[src].output_buffer == 0
+                || interior.rooms[dst].input_buffer >= capacity
+            {
+                break;
+            }
             interior.rooms[src].output_buffer -= 1;
             interior.rooms[dst].input_buffer += 1;
         }
@@ -947,6 +1091,7 @@ fn evaluate_rules(
     engine: Res<EngineCore>,
     hull: Res<HullGraph>,
     cargo: Res<CargoHold>,
+    domain: Res<WorldDomain>,
     mut routing: ResMut<Routing>,
 ) {
     for rule in &rules.rules {
@@ -959,6 +1104,7 @@ fn evaluate_rules(
             Condition::StressAbove { node, level } => {
                 hull.stress[node as usize % HULL_NODES] > level
             }
+            Condition::StormActive => domain.weather.storm_ticks > 0,
         };
         if !fired {
             continue;
@@ -967,6 +1113,44 @@ fn evaluate_rules(
             RuleAction::SetFeedEnabled(enabled) => routing.feed_enabled = enabled,
             RuleAction::SetCoolantEnabled(enabled) => routing.coolant_enabled = enabled,
         }
+    }
+}
+
+/// Interior phase: research accrues only when a working Refinery
+/// processes AncientTech units from cargo (spec 016 section 2): per
+/// processed unit, metered in whole units, deterministic. No passive
+/// trickle and no wall-clock component; a starved or stalled
+/// refinery accrues nothing.
+fn run_refineries(
+    core: Res<EngineCore>,
+    hull: Res<HullGraph>,
+    field: Res<ThermalField>,
+    interior: Res<InteriorGrid>,
+    mut cargo: ResMut<CargoHold>,
+    mut tech: ResMut<TechDomain>,
+) {
+    let working = interior
+        .rooms
+        .iter()
+        .filter(|room| {
+            room.kind == RoomKind::Refinery && interior.room_working(room, &core, &field, &hull)
+        })
+        .count();
+    if working == 0 {
+        return;
+    }
+    let slot = CargoHold::index(ResourceKind::AncientTech);
+    tech.refine_meter += tech::REFINE_UNITS_PER_SECOND * working as f32 * TICK_SECONDS;
+    while tech.refine_meter >= 1.0 {
+        if cargo.amounts[slot] == 0 {
+            // Nothing to process: the meter does not bank against
+            // future stock (accrual is per unit actually processed).
+            tech.refine_meter = 0.0;
+            break;
+        }
+        tech.refine_meter -= 1.0;
+        cargo.amounts[slot] -= 1;
+        tech.research += tech::RESEARCH_PER_TECH;
     }
 }
 
@@ -1043,6 +1227,7 @@ fn update_thermal_field(
     core: Res<EngineCore>,
     hull: Res<HullGraph>,
     interior: Res<InteriorGrid>,
+    tech: Res<TechDomain>,
     mut field: ResMut<ThermalField>,
 ) {
     let old = field.temps.clone();
@@ -1062,7 +1247,10 @@ fn update_thermal_field(
             continue;
         }
         let (w, h) = room.spec().footprint;
-        let per_cell = room.spec().heat_per_second / f32::from(w * h);
+        // The paradigm's heat economy scales every emission and
+        // absorption (spec 016 section 5).
+        let per_cell =
+            room.spec().heat_per_second * tech.profile().heat_emission_factor / f32::from(w * h);
         for cell in room.cells() {
             emission[cell.index()] += per_cell;
         }
@@ -1122,6 +1310,7 @@ fn advance_shutdown_ladder(mut core: ResMut<EngineCore>) {
 fn run_drones(
     core: Res<EngineCore>,
     interior: Res<InteriorGrid>,
+    tech: Res<TechDomain>,
     mut fleet: ResMut<DroneFleet>,
     mut hull: ResMut<HullGraph>,
     mut cargo: ResMut<CargoHold>,
@@ -1162,7 +1351,8 @@ fn run_drones(
             continue;
         };
         let uptime = drone.uptime();
-        let repaired = REPAIR_RATE_PER_SECOND * uptime * TICK_SECONDS;
+        let repaired =
+            REPAIR_RATE_PER_SECOND * uptime * tech.profile().drone_throughput_factor * TICK_SECONDS;
         hull.stress[node] = (hull.stress[node] - repaired).max(0.0);
         drone.wear = (drone.wear + WEAR_PER_SECOND * TICK_SECONDS).min(1.0);
         drone.strut_meter += STRUT_UNITS_PER_SECOND * uptime * TICK_SECONDS;
@@ -1691,6 +1881,265 @@ mod tests {
         assert!(weather.storms_seen > 0, "no storm in 6000 ticks");
     }
 
+    /// Place a working Refinery next to the warm core; the refinery
+    /// costs AncientTech, so the hold is topped up first.
+    fn sim_with_refinery(seed: u64) -> SimWorld {
+        let mut sim = SimWorld::new(seed);
+        let slot = CargoHold::index(ResourceKind::AncientTech);
+        sim.world.resource_mut::<CargoHold>().amounts[slot] = 5;
+        sim.push_command(Command::PlaceRoom {
+            kind: RoomKind::Refinery,
+            origin: CellAddr {
+                deck: 0,
+                x: 5,
+                y: 3,
+            },
+        });
+        sim.tick();
+        assert!(
+            sim.world().resource::<BuildLog>().0.is_empty(),
+            "the refinery placement was rejected"
+        );
+        sim
+    }
+
+    /// Spec 016 section 6 test 1: no passive accrual. A stationary
+    /// run accrues zero research over any tick count, with no
+    /// refinery and with a refinery that has nothing to process.
+    #[test]
+    fn research_never_accrues_passively() {
+        let mut idle = SimWorld::new(211);
+        for _ in 0..400 {
+            idle.tick();
+        }
+        assert_eq!(idle.world().resource::<TechDomain>().research, 0);
+
+        let mut starved = sim_with_refinery(211);
+        let slot = CargoHold::index(ResourceKind::AncientTech);
+        starved.world.resource_mut::<CargoHold>().amounts[slot] = 0;
+        for _ in 0..400 {
+            starved.tick();
+        }
+        assert_eq!(
+            starved.world().resource::<TechDomain>().research,
+            0,
+            "a starved refinery accrued research"
+        );
+    }
+
+    /// Spec 016 section 6 test 2: processing N units yields the same
+    /// research on every replay, and exactly per unit processed.
+    #[test]
+    fn refinery_accrual_is_deterministic_and_per_unit() {
+        let run = || {
+            let mut sim = sim_with_refinery(213);
+            let slot = CargoHold::index(ResourceKind::AncientTech);
+            sim.world.resource_mut::<CargoHold>().amounts[slot] = 10;
+            for _ in 0..600 {
+                sim.tick();
+            }
+            (
+                sim.world().resource::<TechDomain>().research,
+                sim.world().resource::<CargoHold>().amounts[slot],
+            )
+        };
+        let (research, leftover) = run();
+        assert_eq!((research, leftover), run(), "replay diverged");
+        assert_eq!(leftover, 0, "the refinery never chewed the stock");
+        assert_eq!(
+            research,
+            10 * RESEARCH_PER_TECH,
+            "accrual is not per processed unit"
+        );
+    }
+
+    /// Spec 016 section 6 test 3: a gated room, prow, or rule order
+    /// is rejected below its tier with no partial state, and
+    /// accepted at it after a valid advancement.
+    #[test]
+    fn tier_gates_reject_below_and_accept_at_tier() {
+        let mut sim = SimWorld::new(217);
+        let gated_orders = |sim: &mut SimWorld| {
+            sim.push_command(Command::PlaceRoom {
+                kind: RoomKind::Fabricator,
+                origin: CellAddr {
+                    deck: 0,
+                    x: 1,
+                    y: 1,
+                },
+            });
+            sim.push_command(Command::AddRule {
+                condition: Condition::StormActive,
+                action: RuleAction::SetFeedEnabled(false),
+            });
+            sim.push_command(Command::MountProwTrack {
+                track: ProwTrack::HeatedRam,
+            });
+        };
+        gated_orders(&mut sim);
+        sim.tick();
+        let reasons: Vec<RejectReason> = sim
+            .world()
+            .resource::<BuildLog>()
+            .0
+            .iter()
+            .map(|r| r.reason)
+            .collect();
+        assert_eq!(
+            reasons,
+            vec![
+                RejectReason::TierGated,
+                RejectReason::TierGated,
+                RejectReason::TierGated
+            ]
+        );
+        assert_eq!(sim.world().resource::<InteriorGrid>().rooms.len(), 1);
+        assert!(sim.world().resource::<AutomationRules>().rules.is_empty());
+        assert_eq!(
+            sim.world().resource::<ShipKinetics>().prow_track,
+            ProwTrack::Ram
+        );
+
+        // Advancement itself validates: blueprints first, then the
+        // research spend (spec 016 section 3).
+        sim.push_command(Command::AdvanceTier);
+        sim.tick();
+        assert_eq!(
+            sim.world().resource::<BuildLog>().0[0].reason,
+            RejectReason::IncompleteBlueprints
+        );
+        for blueprint in blueprints_required(2) {
+            sim.world
+                .resource_mut::<TechDomain>()
+                .blueprints
+                .insert(*blueprint);
+        }
+        sim.push_command(Command::AdvanceTier);
+        sim.tick();
+        assert_eq!(
+            sim.world().resource::<BuildLog>().0[0].reason,
+            RejectReason::Unaffordable
+        );
+        assert_eq!(sim.world().resource::<TechDomain>().tier, 1);
+
+        sim.world.resource_mut::<TechDomain>().research = research_cost(2);
+        sim.push_command(Command::AdvanceTier);
+        sim.tick();
+        let tech = sim.world().resource::<TechDomain>();
+        assert_eq!(tech.tier, 2);
+        assert_eq!(tech.research, 0, "the spend was not drawn");
+
+        // The same three orders now pass whole.
+        gated_orders(&mut sim);
+        sim.tick();
+        assert!(sim.world().resource::<BuildLog>().0.is_empty());
+        assert_eq!(sim.world().resource::<InteriorGrid>().rooms.len(), 2);
+        assert_eq!(sim.world().resource::<AutomationRules>().rules.len(), 1);
+        assert_eq!(
+            sim.world().resource::<ShipKinetics>().prow_track,
+            ProwTrack::HeatedRam
+        );
+    }
+
+    /// Spec 016 section 6 test 4: a second identical blueprint
+    /// converts to research; the set never double-counts.
+    #[test]
+    fn duplicate_blueprints_convert_to_research() {
+        let mut sim = SimWorld::new(219);
+        let emit = |sim: &mut SimWorld| {
+            let tick = sim.world().resource::<SimTick>().0;
+            sim.world.resource_mut::<EventBus>().emit(
+                tick,
+                EventPayload::Salvage(SalvageEvent::WreckSalvage { blueprint: 3 }),
+            );
+        };
+        emit(&mut sim);
+        sim.tick();
+        {
+            let tech = sim.world().resource::<TechDomain>();
+            assert!(tech.blueprints.contains(&3));
+            assert_eq!(tech.research, 0);
+        }
+        // The duplicate arrives from a different family member and
+        // still converts (the id is what is unique).
+        let tick = sim.world().resource::<SimTick>().0;
+        sim.world.resource_mut::<EventBus>().emit(
+            tick,
+            EventPayload::Salvage(SalvageEvent::NodeVault { blueprint: 3 }),
+        );
+        sim.tick();
+        let tech = sim.world().resource::<TechDomain>();
+        assert_eq!(tech.blueprints.len(), 1, "the set double-counted");
+        assert_eq!(tech.research, DUPLICATE_BLUEPRINT_RESEARCH);
+    }
+
+    /// Spec 016 section 6 test 5: the tick of tier advancement
+    /// applies the whole new profile: fuel and belt throughput flip
+    /// together, and no tick observes a mixed profile.
+    #[test]
+    fn tier_transition_applies_the_whole_profile_atomically() {
+        let build = || {
+            let mut sim = SimWorld::new(223);
+            sim.push_command(Command::SetThrottle { throttle: 1.0 });
+            for (x, kind) in [(1u8, RoomKind::Storage), (3, RoomKind::Storage)] {
+                sim.push_command(Command::PlaceRoom {
+                    kind,
+                    origin: CellAddr { deck: 0, x, y: 1 },
+                });
+            }
+            sim.push_command(Command::LayEdge {
+                kind: SpineKind::Belt,
+                from: CellAddr {
+                    deck: 0,
+                    x: 2,
+                    y: 1,
+                },
+                to: CellAddr {
+                    deck: 0,
+                    x: 3,
+                    y: 1,
+                },
+            });
+            sim.tick();
+            sim.world.resource_mut::<InteriorGrid>().rooms[1].output_buffer = 8;
+            for _ in 0..3 {
+                sim.tick();
+            }
+            sim
+        };
+        let mut held = build();
+        let mut advancing = build();
+        {
+            let mut tech = advancing.world.resource_mut::<TechDomain>();
+            for blueprint in blueprints_required(2) {
+                tech.blueprints.insert(*blueprint);
+            }
+            tech.research = research_cost(2);
+        }
+        advancing.push_command(Command::AdvanceTier);
+        held.tick();
+        advancing.tick();
+
+        // Same tick, both axes at once: the burn line re-priced...
+        let held_burn = held.world().resource::<ShipKinetics>().fuel_burn;
+        let advancing_burn = advancing.world().resource::<ShipKinetics>().fuel_burn;
+        let expected = held_burn * tier_profile(2).fuel_burn_factor;
+        assert!(
+            (advancing_burn - expected).abs() < 1e-4,
+            "fuel did not re-price on the advancement tick \
+             ({advancing_burn} vs expected {expected})"
+        );
+        // ...and the belts at the new throughput.
+        let moved = |sim: &SimWorld| sim.world().resource::<InteriorGrid>().rooms[2].input_buffer;
+        let held_units = moved(&held);
+        let advancing_units = moved(&advancing);
+        assert_eq!(
+            advancing_units - held_units,
+            tier_profile(2).belt_units_per_tick - tier_profile(1).belt_units_per_tick,
+            "belts did not switch throughput on the advancement tick"
+        );
+    }
+
     /// Spec 015 section 6 test 1: overlap, out-of-bounds,
     /// unaffordable, and fixed-room orders are rejected with a typed
     /// reason, and a rejected order touches nothing.
@@ -1777,11 +2226,11 @@ mod tests {
         let mut sim = SimWorld::new(103);
         let scrap = CargoHold::index(ResourceKind::FrozenScrap);
         let start = sim.world().resource::<CargoHold>().amounts[scrap];
-        let cost = room_spec(RoomKind::Fabricator).build_cost[scrap];
+        let cost = room_spec(RoomKind::Foundry).build_cost[scrap];
         let refund = cost / grid::REFUND_DIVISOR;
 
         sim.push_command(Command::PlaceRoom {
-            kind: RoomKind::Fabricator,
+            kind: RoomKind::Foundry,
             origin: CellAddr {
                 deck: 0,
                 x: 1,
@@ -1807,7 +2256,7 @@ mod tests {
 
         // Rebuild, then jettison: no refund, immediate mass relief.
         sim.push_command(Command::PlaceRoom {
-            kind: RoomKind::Fabricator,
+            kind: RoomKind::Foundry,
             origin: CellAddr {
                 deck: 0,
                 x: 1,
@@ -1826,7 +2275,7 @@ mod tests {
         );
         assert!(
             sim.world().resource::<ShipKinetics>().total_mass
-                < mass_loaded - room_spec(RoomKind::Fabricator).mass / 2.0,
+                < mass_loaded - room_spec(RoomKind::Foundry).mass / 2.0,
             "jettison did not shed the room's mass"
         );
     }
@@ -1843,7 +2292,7 @@ mod tests {
             for (kind, x) in [
                 (RoomKind::Storage, 1u8),
                 (RoomKind::Storage, 5),
-                (RoomKind::Fabricator, 3),
+                (RoomKind::Storage, 3),
             ] {
                 sim.push_command(Command::PlaceRoom {
                     kind,
@@ -1949,7 +2398,7 @@ mod tests {
             },
         });
         sim.push_command(Command::PlaceRoom {
-            kind: RoomKind::Fabricator,
+            kind: RoomKind::Storage,
             origin: CellAddr {
                 deck: 0,
                 x: 2,

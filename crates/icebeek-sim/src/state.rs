@@ -36,6 +36,37 @@ pub struct Helm {
     pub anchor_ordered: bool,
 }
 
+/// Prow loadout tracks (spec 004 section 2), tier-gated (spec 016
+/// section 4). Heavier tracks break ice with less prow wear; the
+/// full loadout mechanics (charge, active use) are future spec.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProwTrack {
+    #[default]
+    Ram,
+    HeatedRam,
+    ChargedLance,
+}
+
+impl ProwTrack {
+    /// The tier that unlocks mounting this track (spec 016 section 4).
+    pub const fn min_tier(self) -> u8 {
+        match self {
+            ProwTrack::Ram => 1,
+            ProwTrack::HeatedRam => 2,
+            ProwTrack::ChargedLance => 3,
+        }
+    }
+
+    /// Scale on the class-profiled prow wear rate. Balancing data.
+    pub const fn wear_factor(self) -> f32 {
+        match self {
+            ProwTrack::Ram => 1.0,
+            ProwTrack::HeatedRam => 0.6,
+            ProwTrack::ChargedLance => 0.35,
+        }
+    }
+}
+
 /// Ship kinetics domain (specs 003 section 2, 005 section 5). Total
 /// mass sets the torque needed to keep breaking ice; torque sets fuel
 /// burn: the efficiency tax on sprawl.
@@ -51,9 +82,11 @@ pub struct ShipKinetics {
     pub fuel_burn: f32,
     /// Prow degradation in [0, 1], accrued per world unit broken
     /// through at the ice class's profiled rate (spec 004 section 2
-    /// via spec 014 section 3). The loadout tracks that spend and
-    /// reset it arrive with the tech-tier slice.
+    /// via spec 014 section 3), scaled by the mounted track.
     pub prow_wear: f32,
+    /// The mounted, tier-gated prow loadout track (spec 016
+    /// section 4).
+    pub prow_track: ProwTrack,
 }
 
 /// Hull graph domain (spec 005 section 4): stress per node in [0, 1].
@@ -362,6 +395,20 @@ pub enum Condition {
         node: u32,
         level: f32,
     },
+    /// A super-storm is active: tier-2 cross-system vocabulary (spec
+    /// 005 section 3, gated by spec 016 section 4).
+    StormActive,
+}
+
+impl Condition {
+    /// The tier that unlocks authoring a rule with this condition
+    /// (spec 005 section 3 tiers, enforced per spec 016 section 4).
+    pub const fn min_tier(&self) -> u8 {
+        match self {
+            Condition::StormActive => 2,
+            _ => 1,
+        }
+    }
 }
 
 /// What a tier-1 rule can set: routing switches, never state directly
@@ -528,6 +575,15 @@ pub enum Command {
     RemoveEdge {
         edge: u32,
     },
+    /// Mount a prow loadout track; tier-gated like any build order
+    /// (spec 016 section 4).
+    MountProwTrack {
+        track: ProwTrack,
+    },
+    /// Advance to the next tier: requires the complete blueprint set
+    /// plus the research spend (spec 016 section 3); rejected typed
+    /// otherwise.
+    AdvanceTier,
 }
 
 /// Pending commands, applied by the commands phase in push order.
