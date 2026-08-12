@@ -28,8 +28,8 @@
       }
     ],
     "specId": "014-world-content",
-    "specStatus": "draft"
+    "specStatus": "approved"
   },
   "schemaVersion": "1.1.0",
-  "shardHash": "e00e4e0e800a41b49eeaac3b3ff4c6b5096d6eaa220786d4e9e75aa2088555e3"
+  "shardHash": "8f9dab7e9faa8d77eff0b7a3154ba4245689dec1dd02da463ff260f1d08e141b"
 }

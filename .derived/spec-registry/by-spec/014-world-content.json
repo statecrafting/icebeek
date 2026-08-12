@@ -24,10 +24,10 @@
       "6. Out of scope"
     ],
     "specPath": "specs/014-world-content/spec.md",
-    "status": "draft",
+    "status": "approved",
     "summary": "The mechanism spec that turns spec 006's world design into simulation state: a deterministic ice field derived purely from the map seed, the three ice classes as data profiles that drive break resistance, prow wear, fuel cost, intake yield mix, and hull-stress event profile, and the Fog of Winter as monotonic reveal state fed by sensor coverage. The field is a pure function of (seed, position), never stored; only reveal state serializes. Field derivation uses seed-keyed hashing, never the event RNG, so sensing and navigation cannot perturb the event stream. The exterior renderer presents topography and fog from the same snapshot surface it already reads.\n",
     "title": "World content: the ice field, class profiles, Fog of Winter"
   },
-  "shardHash": "c922005158523278569e20225d4392b38ce4c2e9a3ea518c8cd3abeeaa97f57d",
+  "shardHash": "b2e4ff57fe53d3b0d2be5d551d7e14e1aa52e244be2c0726b515ffe49c37c5bd",
   "specVersion": "1.1.0"
 }

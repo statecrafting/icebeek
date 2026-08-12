@@ -1,7 +1,7 @@
 ---
 id: "014-world-content"
 title: "World content: the ice field, class profiles, Fog of Winter"
-status: draft
+status: approved
 created: "2026-08-11"
 depends_on:
   - "003-core-gameplay-loop"

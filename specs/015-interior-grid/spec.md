@@ -1,7 +1,7 @@
 ---
 id: "015-interior-grid"
 title: "The buildable interior grid: rooms, the spine, refit"
-status: draft
+status: approved
 created: "2026-08-11"
 depends_on:
   - "004-ship-systems"
