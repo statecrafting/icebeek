@@ -83,17 +83,20 @@ review; approved specs are settled authority.
 | 12 | `011-event-bus` | approved (2026-08-11) |
 | 13 | `012-renderers` | approved (2026-08-11) |
 | 14 | `013-ci` | approved (2026-08-11) |
+| 15 | `014-world-content` | draft (2026-08-11): pending human review |
+| 16 | `015-interior-grid` | draft (2026-08-11): pending human review |
+| 17 | `016-tech-tiers` | draft (2026-08-11): pending human review |
+| 18 | `017-save-versioning` | draft (2026-08-11): pending human review |
 
-Next pending: the vertical slice is complete end to end. The sim
-resolves all four event families through every phase; both
-renderers draw first visuals over the snapshot read API (exterior:
-ocean, ship, site marker, weather light; interior: heat overlay,
-stress bars, core and fuel gauges); the app captures input into
-typed commands and owns the view switch. Corpus growth from here
-(ice classes and topography content, the buildable interior grid,
-tech tiers, save versioning) needs new specs authored and
-approved: a human checkpoint, not a mechanical continuation of
-this table.
+Next pending: the vertical slice is complete end to end (all four
+event families resolve through every sim phase; both renderers draw
+first visuals over the snapshot read API; the app captures input
+into typed commands). Specs 014 through 017 are drafted as the next
+growth ring and await human review: THE CHECKPOINT IS APPROVAL.
+No implementation work for 014 through 017 may start while they are
+drafts. Suggested review order is backlog order; 017 (save
+versioning) is a prerequisite for the save-breaking grid rebase
+that 015 section 7 queues.
 
 ## Available Agents
 

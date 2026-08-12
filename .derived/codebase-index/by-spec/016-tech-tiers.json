@@ -1,0 +1,36 @@
+{
+  "mapping": {
+    "dependsOn": [
+      "003-core-gameplay-loop",
+      "006-world-and-expeditions",
+      "007-tech-progression",
+      "010-simulation-core",
+      "011-event-bus"
+    ],
+    "implementingPaths": [
+      {
+        "path": "docs/design/tech-tiers.md",
+        "source": "spec-edge"
+      }
+    ],
+    "resolvedUnits": [
+      {
+        "locations": [
+          {
+            "file": "docs/design/tech-tiers.md"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "file",
+          "path": "docs/design/tech-tiers.md"
+        }
+      }
+    ],
+    "specId": "016-tech-tiers",
+    "specStatus": "draft"
+  },
+  "schemaVersion": "1.1.0",
+  "shardHash": "1cbef191119d9aba9bb2c1eb0b3e7711976df2cf8f8c2d1cc4f5273a5583dbd2"
+}

@@ -1,0 +1,35 @@
+{
+  "record": {
+    "created": "2026-08-11",
+    "dependsOn": [
+      "003-core-gameplay-loop",
+      "006-world-and-expeditions",
+      "007-tech-progression",
+      "010-simulation-core",
+      "011-event-bus"
+    ],
+    "establishes": [
+      {
+        "kind": "file",
+        "path": "docs/design/tech-tiers.md"
+      }
+    ],
+    "id": "016-tech-tiers",
+    "sectionHeadings": [
+      "016: Tech mechanisms",
+      "1. Purpose",
+      "2. Research accrual",
+      "3. Blueprints and the Salvage family",
+      "4. Tier gates",
+      "5. Tier transitions re-price the ship",
+      "6. Test contract",
+      "7. Out of scope"
+    ],
+    "specPath": "specs/016-tech-tiers/spec.md",
+    "status": "draft",
+    "summary": "The mechanism spec for the tech domain (spec 010 section 5, spec 007): research accrues only from processing ingested ancient technology through a Refinery, never passively; tier-gating blueprints arrive from the world as a new Salvage event family (wreck salvage from pack ice, wall caches from glacial breaches, node vaults from expeditions), making major progression a Macro risk decision per spec 007 section 4. Tier state gates what the interior may build and what the prow may mount, and a tier transition deliberately re-prices heat and fuel so prior layouts obsolesce (the paradigm rule of spec 007 section 2). Adding the Salvage family is an explicit spec 011 amendment carried by this spec's implementation PR.\n",
+    "title": "Tech mechanisms: research accrual, blueprints, tier gates"
+  },
+  "shardHash": "3a2204f3d53ef464b44a483940d8fb5a5d307a08a8ebc857a8ce5431f539f3a0",
+  "specVersion": "1.1.0"
+}

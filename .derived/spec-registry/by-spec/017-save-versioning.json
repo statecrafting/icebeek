@@ -1,0 +1,32 @@
+{
+  "record": {
+    "created": "2026-08-11",
+    "dependsOn": [
+      "008-simulation-substrate",
+      "010-simulation-core",
+      "011-event-bus"
+    ],
+    "establishes": [
+      {
+        "kind": "file",
+        "path": "docs/design/save-versioning.md"
+      }
+    ],
+    "id": "017-save-versioning",
+    "sectionHeadings": [
+      "017: Save versioning",
+      "1. Purpose",
+      "2. The envelope",
+      "3. Compatibility rules",
+      "4. Migration chains",
+      "5. Test contract",
+      "6. Out of scope"
+    ],
+    "specPath": "specs/017-save-versioning/spec.md",
+    "status": "draft",
+    "summary": "The policy spec 010 section 7 deferred: a versioned save envelope (format version, crate version, TICK_HZ) wrapping the state payload; a compatibility rule of load-same, migrate-older-when-a-chain-exists, refuse-newer, refuse-unknown, always with a typed error naming the versions; and migration as a chain of pure, total, deterministic functions from version N to N+1, exercised against committed golden fixture saves. The event schema is save surface (spec 011 section 6), so variant renames and removals ride format bumps here instead of breaking silently. Until a migration is authored, a bump refuses old saves loudly; corrupting or reinterpreting them is never an option.\n",
+    "title": "Save versioning: the envelope, migration chains, refusal"
+  },
+  "shardHash": "49540b378dcbadce472f8939b12a4ee146da7f5ba9c6fcf9df8fd3447400e08a",
+  "specVersion": "1.1.0"
+}
