@@ -1,0 +1,35 @@
+{
+  "mapping": {
+    "dependsOn": [
+      "003-core-gameplay-loop",
+      "006-world-and-expeditions",
+      "010-simulation-core",
+      "012-renderers"
+    ],
+    "implementingPaths": [
+      {
+        "path": "docs/design/world-content.md",
+        "source": "spec-edge"
+      }
+    ],
+    "resolvedUnits": [
+      {
+        "locations": [
+          {
+            "file": "docs/design/world-content.md"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "file",
+          "path": "docs/design/world-content.md"
+        }
+      }
+    ],
+    "specId": "014-world-content",
+    "specStatus": "draft"
+  },
+  "schemaVersion": "1.1.0",
+  "shardHash": "e00e4e0e800a41b49eeaac3b3ff4c6b5096d6eaa220786d4e9e75aa2088555e3"
+}

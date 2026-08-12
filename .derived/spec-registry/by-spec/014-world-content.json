@@ -1,0 +1,33 @@
+{
+  "record": {
+    "created": "2026-08-11",
+    "dependsOn": [
+      "003-core-gameplay-loop",
+      "006-world-and-expeditions",
+      "010-simulation-core",
+      "012-renderers"
+    ],
+    "establishes": [
+      {
+        "kind": "file",
+        "path": "docs/design/world-content.md"
+      }
+    ],
+    "id": "014-world-content",
+    "sectionHeadings": [
+      "014: World content",
+      "1. Purpose",
+      "2. The ice field",
+      "3. Class profiles",
+      "4. Fog of Winter",
+      "5. Test contract",
+      "6. Out of scope"
+    ],
+    "specPath": "specs/014-world-content/spec.md",
+    "status": "draft",
+    "summary": "The mechanism spec that turns spec 006's world design into simulation state: a deterministic ice field derived purely from the map seed, the three ice classes as data profiles that drive break resistance, prow wear, fuel cost, intake yield mix, and hull-stress event profile, and the Fog of Winter as monotonic reveal state fed by sensor coverage. The field is a pure function of (seed, position), never stored; only reveal state serializes. Field derivation uses seed-keyed hashing, never the event RNG, so sensing and navigation cannot perturb the event stream. The exterior renderer presents topography and fog from the same snapshot surface it already reads.\n",
+    "title": "World content: the ice field, class profiles, Fog of Winter"
+  },
+  "shardHash": "c922005158523278569e20225d4392b38ce4c2e9a3ea518c8cd3abeeaa97f57d",
+  "specVersion": "1.1.0"
+}

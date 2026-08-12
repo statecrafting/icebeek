@@ -1,0 +1,35 @@
+{
+  "mapping": {
+    "dependsOn": [
+      "004-ship-systems",
+      "005-automation-control-plane",
+      "010-simulation-core",
+      "012-renderers"
+    ],
+    "implementingPaths": [
+      {
+        "path": "docs/design/interior-grid.md",
+        "source": "spec-edge"
+      }
+    ],
+    "resolvedUnits": [
+      {
+        "locations": [
+          {
+            "file": "docs/design/interior-grid.md"
+          }
+        ],
+        "ownership": true,
+        "sourceField": "establishes",
+        "unit": {
+          "kind": "file",
+          "path": "docs/design/interior-grid.md"
+        }
+      }
+    ],
+    "specId": "015-interior-grid",
+    "specStatus": "draft"
+  },
+  "schemaVersion": "1.1.0",
+  "shardHash": "089ed8cd80024a25720efe35adbc741fbd86f8c4f719c7db1e043473a9b90fbb"
+}
