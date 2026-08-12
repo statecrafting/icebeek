@@ -89,12 +89,13 @@ review; approved specs are settled authority.
 | 18 | `017-save-versioning` | approved (2026-08-11) |
 
 Next pending: the growth ring 014 through 017 passed its human
-checkpoint on 2026-08-11 (approval recorded by direction of the
-repository owner) and implementation work re-opens. Implementation
-order is 017 first, then 014, 015, 016: every remaining spec makes
-save-schema-visible changes, so the spec 017 envelope and migration
-policy must land before any of them, and 015 section 7 explicitly
-sequences its save-breaking grid rebase after 017 is implemented.
+checkpoint on 2026-08-11; 017 (save versioning) is implemented, so
+every save now travels in the versioned envelope and every
+schema-visible change rides a format bump under its policy.
+Implementation continues in the recorded order: 014 (world content)
+next, then 015 (interior grid, whose section 7 rebase 017 has now
+unblocked), then 016 (tech tiers, which also amends spec 011 with
+the Salvage family).
 
 ## Available Agents
 

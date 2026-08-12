@@ -193,8 +193,10 @@ A save is the serialized shared state plus both pending queues and
 the RNG state, nothing else (spec 008 requirement 4). Loading a save
 and applying the same subsequent commands produces the same states as
 the uninterrupted run. Save format versioning and migration policy is
-a future spec; until then saves carry the crate version and TICK_HZ
-and may refuse a mismatch.
+spec 017: on disk a save travels inside its versioned envelope
+(format version, crate version, TICK_HZ), and loading follows its
+compatibility rules. A tick-rate mismatch remains a refusal until a
+migration explicitly converts it.
 
 ## 8. Test contract
 
@@ -230,4 +232,5 @@ first commit. Until then this spec owns
 - Balancing data (rates, recipes, room rosters, event tables) and the
   rule-language authoring syntax: future specs; this spec fixes
   mechanisms, not numbers.
-- Save-format versioning and migration: future spec, per section 7.
+- Save-format versioning and migration: spec `017-save-versioning`,
+  per section 7.

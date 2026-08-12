@@ -7,6 +7,7 @@
 //! phase so the determinism test contract is real from the first commit.
 
 mod rng;
+mod save;
 mod state;
 mod view;
 
@@ -17,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 pub use icebeek_events as events;
 pub use rng::SimRng;
+pub use save::{Migration, SAVE_FORMAT_VERSION, SaveError};
 pub use state::{
     AMBIENT_C, AutomationRule, AutomationRules, COMPARTMENTS, Capability, CargoHold, Command,
     CommandQueue, Condition, Drone, DroneFleet, DroneKind, DroneZone, EngineCore, Equipment,
@@ -147,12 +149,13 @@ pub struct TickTrace {
 }
 
 /// A save is the serialized shared state plus both pending queues and
-/// the RNG state, nothing else (spec 010 section 7).
+/// the RNG state, nothing else (spec 010 section 7). On disk it
+/// travels as the payload of the spec 017 envelope, which carries the
+/// format version, crate version, and tick rate; [`SimWorld::save_bytes`]
+/// wraps it and [`SimWorld::from_save_bytes`] enforces the
+/// compatibility rules.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SaveState {
-    /// Tick rate the save was written under; loading refuses a mismatch
-    /// until the save-versioning spec exists.
-    pub tick_hz: u32,
     pub tick: SimTick,
     pub helm: Helm,
     pub kinetics: ShipKinetics,
@@ -170,28 +173,6 @@ pub struct SaveState {
     pub events: EventBus,
     pub commands: CommandQueue,
 }
-
-#[derive(Debug)]
-pub enum SaveError {
-    TickRateMismatch { saved: u32, expected: u32 },
-    Decode(String),
-}
-
-impl std::fmt::Display for SaveError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SaveError::TickRateMismatch { saved, expected } => {
-                write!(
-                    f,
-                    "save written at {saved} Hz, this build runs {expected} Hz"
-                )
-            }
-            SaveError::Decode(err) => write!(f, "save decode failed: {err}"),
-        }
-    }
-}
-
-impl std::error::Error for SaveError {}
 
 /// The simulation world and its four phase schedules. The host owns the
 /// accumulator and calls [`SimWorld::tick`]; there is no internal clock
@@ -334,7 +315,6 @@ impl SimWorld {
 
     pub fn save(&self) -> SaveState {
         SaveState {
-            tick_hz: TICK_HZ,
             tick: self.world.resource::<SimTick>().clone(),
             helm: self.world.resource::<Helm>().clone(),
             kinetics: self.world.resource::<ShipKinetics>().clone(),
@@ -354,13 +334,11 @@ impl SimWorld {
         }
     }
 
-    pub fn from_save(save: SaveState) -> Result<Self, SaveError> {
-        if save.tick_hz != TICK_HZ {
-            return Err(SaveError::TickRateMismatch {
-                saved: save.tick_hz,
-                expected: TICK_HZ,
-            });
-        }
+    /// Rehydrate a world from an in-process [`SaveState`]. Envelope
+    /// and version checks live on the byte path
+    /// ([`SimWorld::from_save_bytes`]); a `SaveState` in hand is
+    /// already current-format by construction.
+    pub fn from_save(save: SaveState) -> Self {
         let mut world = World::new();
         world.insert_resource(save.tick);
         world.insert_resource(save.helm);
@@ -379,17 +357,21 @@ impl SimWorld {
         world.insert_resource(save.events);
         world.insert_resource(save.commands);
         world.insert_resource(PhaseLog::default());
-        Ok(Self::with_world(world))
+        Self::with_world(world)
     }
 
+    /// Serialize the full save: the spec 017 envelope (format
+    /// version, crate version, tick rate) around the state payload.
     pub fn save_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.save()).expect("save state serializes")
+        save::encode(&self.save())
     }
 
+    /// Load a save from bytes under the spec 017 compatibility
+    /// rules: the same format loads, an older format migrates when a
+    /// complete stepwise chain exists, and everything else refuses
+    /// with a typed [`SaveError`] naming the versions involved.
     pub fn from_save_bytes(bytes: &[u8]) -> Result<Self, SaveError> {
-        let save: SaveState =
-            serde_json::from_slice(bytes).map_err(|e| SaveError::Decode(e.to_string()))?;
-        Self::from_save(save)
+        Ok(Self::from_save(save::decode(bytes)?))
     }
 }
 
@@ -1420,22 +1402,6 @@ mod tests {
             sim.world.resource::<EngineCore>().temperature < 200.0,
             "coolant failed to pull the core down"
         );
-    }
-
-    /// Spec 010 section 7: a tick-rate mismatch is refused, not
-    /// reinterpreted.
-    #[test]
-    fn tick_rate_mismatch_refused() {
-        let mut save = SimWorld::new(5).save();
-        save.tick_hz = TICK_HZ + 1;
-        match SimWorld::from_save(save) {
-            Err(SaveError::TickRateMismatch { saved, expected }) => {
-                assert_eq!(saved, TICK_HZ + 1);
-                assert_eq!(expected, TICK_HZ);
-            }
-            Err(other) => panic!("wrong error: {other:?}"),
-            Ok(_) => panic!("expected TickRateMismatch"),
-        }
     }
 }
 
