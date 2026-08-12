@@ -90,7 +90,9 @@ the logistics spine (belts, pipes, data lines), drones in motion,
 machine states, and a heat overlay over the thermal field (spec 004
 §4 and §5). Top-down. Its audio palette is the interior one:
 machinery hum, belt rhythm. It renders no horizon, terrain, or hull
-exterior (spec 002 §2).
+exterior (spec 002 §2). The heat overlay reads per-cell temperatures
+from the snapshot's grid surface (spec 015 §3); room and spine
+presentation arrives with the build-UI slice.
 
 ## 5. The app shell
 

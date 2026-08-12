@@ -9,7 +9,7 @@
 use bevy_ecs::prelude::Resource;
 use icebeek_events::ResourceKind;
 
-use crate::state::{COMPARTMENTS, HULL_NODES};
+use crate::state::HULL_NODES;
 use crate::world_field::IceClass;
 
 /// Side length, in cells, of the terrain window a snapshot carries.
@@ -49,7 +49,11 @@ pub struct SimSnapshot {
     pub heading_rad: f32,
     pub speed: f32,
     pub hull_stress: [f32; HULL_NODES],
-    pub compartment_temps: [f32; COMPARTMENTS],
+    /// Interior grid dimensions and the per-cell temperatures the
+    /// Micro's heat overlay reads (spec 015 section 3), row-major.
+    pub grid_width: usize,
+    pub grid_height: usize,
+    pub cell_temps: Vec<f32>,
     pub core_temperature: f32,
     /// Fill fraction of the core-side fuel buffer, in [0, 1].
     pub fuel_fraction: f32,
@@ -99,7 +103,9 @@ mod tests {
             heading_rad: 0.0,
             speed: 0.0,
             hull_stress: [0.0; HULL_NODES],
-            compartment_temps: [0.0; COMPARTMENTS],
+            grid_width: 2,
+            grid_height: 1,
+            cell_temps: vec![0.0; 2],
             core_temperature: 0.0,
             fuel_fraction: 0.0,
             shutdown_stage: 0,

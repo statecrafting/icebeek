@@ -1,12 +1,13 @@
 //! The Micro view (spec 012 section 4): top-down cross-section interior.
 //!
-//! First visuals: the compartment row under a heat overlay, per-node
-//! hull stress bars, the engine core gauge, and the fuel bar. All
-//! systems read the sim through the snapshot pair the app maintains
-//! (spec 012 section 2); nothing here writes simulation state.
+//! First visuals: the interior grid's cells under a heat overlay
+//! (per-cell temperatures, spec 015 section 3), per-node hull stress
+//! bars, the engine core gauge, and the fuel bar. All systems read
+//! the sim through the snapshot pair the app maintains (spec 012
+//! section 2); nothing here writes simulation state.
 
 use bevy::prelude::*;
-use icebeek_sim::{AMBIENT_C, COMPARTMENTS, SimSnapshots};
+use icebeek_sim::{AMBIENT_C, GRID_H, GRID_W, SimSnapshots};
 
 /// Marker for the Micro camera; the app shell toggles focus between
 /// the two views (spec 012 section 5 rule 4). Starts unfocused.
@@ -14,7 +15,7 @@ use icebeek_sim::{AMBIENT_C, COMPARTMENTS, SimSnapshots};
 pub struct InteriorCamera;
 
 #[derive(Component)]
-struct CompartmentVisual(usize);
+struct CellVisual(usize);
 
 #[derive(Component)]
 struct StressVisual(usize);
@@ -25,7 +26,7 @@ struct CoreVisual;
 #[derive(Component)]
 struct FuelVisual;
 
-/// Layout of the compartment row, in logical pixels.
+/// Layout of the cell grid, in logical pixels.
 const CELL: f32 = 44.0;
 const CELL_SIZE: f32 = 40.0;
 /// Width of the fuel bar at a full buffer.
@@ -66,26 +67,36 @@ fn spawn_camera(mut commands: Commands) {
 /// simulation state (spec 012 section 2 rule 2; exercised by the
 /// rebuild test below).
 fn spawn_picture(mut commands: Commands) {
-    let row_offset = (COMPARTMENTS as f32 - 1.0) * CELL / 2.0;
-    for i in 0..COMPARTMENTS {
-        let x = i as f32 * CELL - row_offset;
+    let column_offset = (GRID_W as f32 - 1.0) * CELL / 2.0;
+    let row_offset = (GRID_H as f32 - 1.0) * CELL / 2.0;
+    // The cell grid under the heat overlay, row 0 (the hull row) at
+    // the top like the cross-section reads.
+    for index in 0..GRID_W * GRID_H {
+        let x = (index % GRID_W) as f32 * CELL - column_offset;
+        let y = row_offset - (index / GRID_W) as f32 * CELL;
         commands.spawn((
-            CompartmentVisual(i),
+            CellVisual(index),
             Sprite {
                 color: heat_color(15.0),
                 custom_size: Some(Vec2::splat(CELL_SIZE)),
                 ..default()
             },
-            Transform::from_xyz(x, 0.0, 0.0),
+            Transform::from_xyz(x, y, 0.0),
         ));
+    }
+    // Per-node stress bars above the hull row.
+    let nodes = icebeek_sim::HULL_NODES;
+    let node_offset = (nodes as f32 - 1.0) * CELL * 2.0 / 2.0;
+    for i in 0..nodes {
+        let x = i as f32 * CELL * 2.0 - node_offset;
         commands.spawn((
             StressVisual(i),
             Sprite {
                 color: stress_color(0.0),
-                custom_size: Some(Vec2::new(CELL_SIZE, 6.0)),
+                custom_size: Some(Vec2::new(CELL_SIZE * 2.0, 6.0)),
                 ..default()
             },
-            Transform::from_xyz(x, CELL_SIZE / 2.0 + 8.0, 0.0),
+            Transform::from_xyz(x, row_offset + CELL, 0.0),
         ));
     }
     commands.spawn((
@@ -95,7 +106,7 @@ fn spawn_picture(mut commands: Commands) {
             custom_size: Some(Vec2::splat(CELL_SIZE + 8.0)),
             ..default()
         },
-        Transform::from_xyz(0.0, -70.0, 0.0),
+        Transform::from_xyz(0.0, -row_offset - CELL * 1.5, 0.0),
     ));
     commands.spawn((
         FuelVisual,
@@ -104,7 +115,7 @@ fn spawn_picture(mut commands: Commands) {
             custom_size: Some(Vec2::new(FUEL_BAR_WIDTH, 10.0)),
             ..default()
         },
-        Transform::from_xyz(0.0, -110.0, 0.0),
+        Transform::from_xyz(0.0, -row_offset - CELL * 2.5, 0.0),
     ));
 }
 
@@ -134,13 +145,16 @@ pub fn stress_color(stress: f32) -> Color {
 fn paint_heat_overlay(
     snapshots: Res<SimSnapshots>,
     fixed_time: Res<Time<Fixed>>,
-    mut query: Query<(&CompartmentVisual, &mut Sprite)>,
+    mut query: Query<(&CellVisual, &mut Sprite)>,
 ) {
     let alpha = fixed_time.overstep_fraction();
-    for (compartment, mut sprite) in &mut query {
+    for (cell, mut sprite) in &mut query {
+        if cell.0 >= snapshots.curr.cell_temps.len() || cell.0 >= snapshots.prev.cell_temps.len() {
+            continue;
+        }
         let temp = interpolate_scalar(
-            snapshots.prev.compartment_temps[compartment.0],
-            snapshots.curr.compartment_temps[compartment.0],
+            snapshots.prev.cell_temps[cell.0],
+            snapshots.curr.cell_temps[cell.0],
             alpha,
         );
         sprite.color = heat_color(temp);

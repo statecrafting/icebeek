@@ -137,10 +137,11 @@ field latitude, so they are pinned here:
   time never participates.
 - **Thermal relaxation.** The thermal field updates by reading the
   previous tick's temperatures and writing the next (double
-  buffered), so compartment iteration order cannot leak into state.
-  For the vertical slice the compartment set aligns one-to-one with
-  hull-graph nodes; the real room graph arrives with the interior
-  grid domain.
+  buffered), so cell iteration order cannot leak into state. The
+  field lives per grid cell (spec 015 §3; the bootstrap compartment
+  ring is retired): heat sources are working rooms' emissions and
+  the core's coupling into its own cells, sinks are Heat Sinks and
+  the per-cell leak toward ambient.
 - **Rule evaluation.** Automation rules evaluate once per tick at the
   start of the interior phase, in their stored, player-visible list
   order (spec 005 §3). When two rules write the same routing switch,
@@ -166,6 +167,14 @@ field latitude, so they are pinned here:
   progression resolves as ambient stress distributed across the
   whole hull graph, and extraction hauls travel as ordinary
   Ingestion events (spec 006 §4).
+- **Grid determinism.** Build and refit orders validate atomically
+  in the commands phase against bounds, overlap, and cargo cost: an
+  invalid order drops with a typed rejection and touches nothing
+  (spec 015 §5). Spine edges process in stable creation order and a
+  full destination back-pressures rather than drops; breach state
+  derives from hull stress through the stored cell-to-node mapping,
+  disabling a breached cell's rooms and severing its edges so
+  cascade reach follows spine topology (spec 015 §4).
 - **World field and reveal.** The ice field is a pure function of
   (map seed, position), computed on demand through seed-keyed
   hashing; field lookups draw nothing from the event RNG, so

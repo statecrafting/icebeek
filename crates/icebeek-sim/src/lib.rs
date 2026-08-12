@@ -6,6 +6,7 @@
 //! The bootstrap slice implements a thin vertical path through every
 //! phase so the determinism test contract is real from the first commit.
 
+mod grid;
 mod rng;
 mod save;
 mod state;
@@ -17,15 +18,18 @@ use bevy_ecs::schedule::{LogLevel, ScheduleBuildSettings, SingleThreadedExecutor
 use bevy_ecs::system::ScheduleSystem;
 use serde::{Deserialize, Serialize};
 
+pub use grid::{
+    BuildLog, BuildRejection, CellAddr, DECKS, GRID_H, GRID_W, InteriorGrid, RejectReason, Room,
+    RoomKind, RoomSpec, SpineEdge, SpineKind, room_spec,
+};
 pub use icebeek_events as events;
 pub use rng::SimRng;
 pub use save::{Migration, SAVE_FORMAT_VERSION, SaveError};
 pub use state::{
-    AMBIENT_C, AutomationRule, AutomationRules, COMPARTMENTS, Capability, CargoHold, Command,
-    CommandQueue, Condition, Drone, DroneFleet, DroneKind, DroneZone, EngineCore, Equipment,
-    EventBus, ExpeditionState, FogOfWinter, HULL_NODES, Helm, HullGraph, OPERATING_C, Routing,
-    RuleAction, SHUTDOWN_LADDER, ShipKinetics, ShipSystem, SimTick, ThermalField, WeatherState,
-    WorldDomain,
+    AMBIENT_C, AutomationRule, AutomationRules, Capability, CargoHold, Command, CommandQueue,
+    Condition, Drone, DroneFleet, DroneKind, DroneZone, EngineCore, Equipment, EventBus,
+    ExpeditionState, FogOfWinter, HULL_NODES, Helm, HullGraph, OPERATING_C, Routing, RuleAction,
+    SHUTDOWN_LADDER, ShipKinetics, ShipSystem, SimTick, ThermalField, WeatherState, WorldDomain,
 };
 pub use view::{SimSnapshot, SimSnapshots, TERRAIN_VIEW_SIDE, TerrainView};
 pub use world_field::{
@@ -91,14 +95,13 @@ const COOLANT_THRESHOLD_C: f32 = 110.0;
 const COOLANT_UNITS_PER_SECOND: f32 = 0.5;
 /// Core cooling per melted ice unit, in degrees C.
 const COOLING_PER_ICE: f32 = 30.0;
-/// Compartment-to-compartment diffusion rate, per second.
+/// Cell-to-cell diffusion rate over the grid, per neighbor per second.
 const DIFFUSION_PER_SECOND: f32 = 0.4;
-/// Compartment leak toward the ambient exterior, per second.
+/// Cell leak toward the ambient exterior, per second.
 const HULL_LEAK_PER_SECOND: f32 = 0.02;
-/// Core-to-compartment thermal coupling, per second.
+/// Core-to-cell thermal coupling into the core room's cells, per
+/// second.
 const CORE_COUPLING_PER_SECOND: f32 = 0.1;
-/// Compartment hosting the engine core.
-const CORE_COMPARTMENT: usize = 0;
 
 /// Per-second chance of a super-storm onset while the sky is clear.
 const STORM_CHANCE_PER_SECOND: f32 = 0.02;
@@ -170,6 +173,7 @@ pub struct SaveState {
     pub hull: HullGraph,
     pub engine: EngineCore,
     pub thermal: ThermalField,
+    pub grid: InteriorGrid,
     pub drones: DroneFleet,
     pub rules: AutomationRules,
     pub routing: Routing,
@@ -205,6 +209,7 @@ impl SimWorld {
         world.insert_resource(HullGraph::default());
         world.insert_resource(EngineCore::default());
         world.insert_resource(ThermalField::default());
+        world.insert_resource(InteriorGrid::default());
         world.insert_resource(DroneFleet::default());
         world.insert_resource(AutomationRules::default());
         world.insert_resource(Routing::default());
@@ -219,6 +224,7 @@ impl SimWorld {
         world.insert_resource(EventBus::default());
         world.insert_resource(CommandQueue::default());
         world.insert_resource(PhaseLog::default());
+        world.insert_resource(BuildLog::default());
         Self::with_world(world)
     }
 
@@ -243,6 +249,7 @@ impl SimWorld {
                     evaluate_rules,
                     consume_events,
                     thaw_equipment,
+                    run_spine,
                     feed_engine,
                     burn_fuel,
                     route_coolant,
@@ -319,7 +326,9 @@ impl SimWorld {
             heading_rad: helm.heading_rad,
             speed: kinetics.speed,
             hull_stress: self.world.resource::<HullGraph>().stress,
-            compartment_temps: self.world.resource::<ThermalField>().temps,
+            grid_width: GRID_W,
+            grid_height: GRID_H,
+            cell_temps: self.world.resource::<ThermalField>().temps.clone(),
             core_temperature: engine.temperature,
             fuel_fraction: (engine.fuel_buffer / FUEL_BUFFER_CAP).clamp(0.0, 1.0),
             shutdown_stage: engine.shutdown_stage,
@@ -357,6 +366,7 @@ impl SimWorld {
             hull: self.world.resource::<HullGraph>().clone(),
             engine: self.world.resource::<EngineCore>().clone(),
             thermal: self.world.resource::<ThermalField>().clone(),
+            grid: self.world.resource::<InteriorGrid>().clone(),
             drones: self.world.resource::<DroneFleet>().clone(),
             rules: self.world.resource::<AutomationRules>().clone(),
             routing: self.world.resource::<Routing>().clone(),
@@ -382,6 +392,7 @@ impl SimWorld {
         world.insert_resource(save.hull);
         world.insert_resource(save.engine);
         world.insert_resource(save.thermal);
+        world.insert_resource(save.grid);
         world.insert_resource(save.drones);
         world.insert_resource(save.rules);
         world.insert_resource(save.routing);
@@ -393,6 +404,7 @@ impl SimWorld {
         world.insert_resource(save.events);
         world.insert_resource(save.commands);
         world.insert_resource(PhaseLog::default());
+        world.insert_resource(BuildLog::default());
         Self::with_world(world)
     }
 
@@ -440,23 +452,38 @@ fn mark_readback(mut log: ResMut<PhaseLog>) {
     log.0.push(Phase::Readback);
 }
 
-/// Commands phase: apply queued player commands in push order.
+/// Commands phase: apply queued player commands in push order. Build
+/// and refit orders validate here (spec 015 section 5): an invalid
+/// order drops with a typed rejection into the build log and touches
+/// nothing; a valid one applies whole.
+#[allow(clippy::too_many_arguments)]
 fn apply_commands(
     mut queue: ResMut<CommandQueue>,
     mut helm: ResMut<Helm>,
     mut rules: ResMut<AutomationRules>,
     mut fleet: ResMut<DroneFleet>,
     mut equipment: ResMut<Equipment>,
+    mut interior: ResMut<InteriorGrid>,
+    mut cargo: ResMut<CargoHold>,
+    mut build_log: ResMut<BuildLog>,
 ) {
+    build_log.0.clear();
+    let reject = |log: &mut BuildLog, command: Command, reason: RejectReason| {
+        log.0.push(BuildRejection { command, reason });
+    };
     while let Some(command) = queue.pending.pop_front() {
         match command {
             Command::SetHeading { heading_rad } => helm.heading_rad = heading_rad,
             Command::SetThrottle { throttle } => helm.throttle = throttle.clamp(0.0, 1.0),
             Command::SetAnchor { anchored } => helm.anchor_ordered = anchored,
             Command::ManualThaw { node } => {
-                let node = node as usize % HULL_NODES;
-                equipment.valve_frozen[node] = 0;
-                equipment.sensor_frozen[node] = 0;
+                let node = (node as usize % HULL_NODES) as u8;
+                for x in 0..GRID_W {
+                    if interior.hull_node_of_column[x] == node {
+                        equipment.valve_frozen[x] = 0;
+                        equipment.sensor_frozen[x] = 0;
+                    }
+                }
             }
             Command::AddRule { condition, action } => {
                 let id = rules.next_rule_id;
@@ -470,12 +497,87 @@ fn apply_commands(
             Command::RemoveRule { id } => rules.rules.retain(|rule| rule.id != id),
             Command::SetDroneZone { drone, zone } => {
                 if let Some(drone) = fleet.drones.get_mut(drone as usize) {
-                    let last = (HULL_NODES - 1) as u32;
+                    let last = (GRID_W - 1) as u32;
                     let from = zone.from.min(last);
                     drone.zone = DroneZone {
                         from,
                         to: zone.to.clamp(from, last),
                     };
+                }
+            }
+            Command::PlaceRoom { kind, origin } => {
+                if let Some(reason) = interior.placement_rejection(kind, origin) {
+                    reject(&mut build_log, Command::PlaceRoom { kind, origin }, reason);
+                    continue;
+                }
+                let cost = room_spec(kind).build_cost;
+                if !cargo.can_afford(&cost) {
+                    reject(
+                        &mut build_log,
+                        Command::PlaceRoom { kind, origin },
+                        RejectReason::Unaffordable,
+                    );
+                    continue;
+                }
+                cargo.deduct(&cost);
+                let id = interior.next_room_id;
+                interior.next_room_id += 1;
+                interior.rooms.push(Room {
+                    id,
+                    kind,
+                    origin,
+                    input_buffer: 0,
+                    output_buffer: 0,
+                });
+            }
+            Command::RemoveRoom { room } | Command::Jettison { room } => {
+                let refunds = matches!(command, Command::RemoveRoom { .. });
+                let Some(index) = interior.rooms.iter().position(|r| r.id == room) else {
+                    reject(&mut build_log, command, RejectReason::UnknownRoom);
+                    continue;
+                };
+                if interior.rooms[index].kind == RoomKind::EngineCore {
+                    reject(&mut build_log, command, RejectReason::FixedRoom);
+                    continue;
+                }
+                let removed = interior.rooms.remove(index);
+                if refunds {
+                    // The pinned refund (spec 015 section 5): a fixed
+                    // fraction of the build cost comes back; the rest
+                    // is the declared loss of refit.
+                    for (slot, cost) in removed.spec().build_cost.iter().enumerate() {
+                        cargo.amounts[slot] += cost / grid::REFUND_DIVISOR;
+                    }
+                }
+            }
+            Command::LayEdge { kind, from, to } => {
+                if let Some(reason) = interior.edge_rejection(kind, from, to) {
+                    reject(&mut build_log, Command::LayEdge { kind, from, to }, reason);
+                    continue;
+                }
+                let scrap = CargoHold::index(ResourceKind::FrozenScrap);
+                if cargo.amounts[scrap] < grid::EDGE_COST_SCRAP {
+                    reject(
+                        &mut build_log,
+                        Command::LayEdge { kind, from, to },
+                        RejectReason::Unaffordable,
+                    );
+                    continue;
+                }
+                cargo.amounts[scrap] -= grid::EDGE_COST_SCRAP;
+                let id = interior.next_edge_id;
+                interior.next_edge_id += 1;
+                interior.edges.push(SpineEdge { id, kind, from, to });
+            }
+            Command::RemoveEdge { edge } => {
+                let before = interior.edges.len();
+                interior.edges.retain(|e| e.id != edge);
+                if interior.edges.len() == before {
+                    reject(
+                        &mut build_log,
+                        Command::RemoveEdge { edge },
+                        RejectReason::UnknownEdge,
+                    );
                 }
             }
         }
@@ -495,6 +597,7 @@ fn drive_kinetics(
     helm: Res<Helm>,
     capability: Res<Capability>,
     cargo: Res<CargoHold>,
+    interior: Res<InteriorGrid>,
     domain: Res<WorldDomain>,
 ) {
     let profile = world_field::profile(world_field::class_at(domain.map_seed, kinetics.position));
@@ -506,8 +609,12 @@ fn drive_kinetics(
             * (1.0 - profile.break_resistance)
     };
     kinetics.speed = speed;
+    // Total mass is hull plus cargo plus every placed room: the
+    // sprawl half of the spec 005 section 5 efficiency tax, which is
+    // also what makes Jettison immediate mass relief (spec 015
+    // section 5).
     let cargo_units: u64 = cargo.amounts.iter().sum();
-    kinetics.total_mass = BASE_MASS + cargo_units as f32 * CARGO_UNIT_MASS;
+    kinetics.total_mass = BASE_MASS + cargo_units as f32 * CARGO_UNIT_MASS + interior.room_mass();
     kinetics.torque_demand =
         kinetics.total_mass * speed / (BASE_MASS * MAX_SPEED) * profile.fuel_cost_factor;
     kinetics.fuel_burn = IDLE_BURN_PER_SECOND + TORQUE_BURN_PER_SECOND * kinetics.torque_demand;
@@ -721,14 +828,25 @@ fn run_expedition(
 }
 
 /// Interior phase: events become state changes, the only translation
-/// (spec 002 section 3 rule 2).
+/// (spec 002 section 3 rule 2). Weather freeze events target hull
+/// nodes and resolve onto the node's column band of grid-cell
+/// equipment (spec 015 section 7).
 fn consume_events(
     mut bus: ResMut<EventBus>,
     mut hull: ResMut<HullGraph>,
     mut cargo: ResMut<CargoHold>,
     mut equipment: ResMut<Equipment>,
     mut fleet: ResMut<DroneFleet>,
+    interior: Res<InteriorGrid>,
 ) {
+    let freeze_band = |bank: &mut [u32; GRID_W], node: u32| {
+        let node = (node as usize % HULL_NODES) as u8;
+        for (x, slot) in bank.iter_mut().enumerate() {
+            if interior.hull_node_of_column[x] == node {
+                *slot = THAW_TICKS;
+            }
+        }
+    };
     while let Some(event) = bus.queue.pop() {
         match event.payload {
             EventPayload::Impact { node, magnitude } => {
@@ -739,10 +857,10 @@ fn consume_events(
                 cargo.amounts[CargoHold::index(resource)] += u64::from(amount);
             }
             EventPayload::Weather(WeatherEvent::ValveFreeze { node }) => {
-                equipment.valve_frozen[node as usize % HULL_NODES] = THAW_TICKS;
+                freeze_band(&mut equipment.valve_frozen, node);
             }
             EventPayload::Weather(WeatherEvent::SensorFreeze { node }) => {
-                equipment.sensor_frozen[node as usize % HULL_NODES] = THAW_TICKS;
+                freeze_band(&mut equipment.sensor_frozen, node);
             }
             EventPayload::Weather(WeatherEvent::DroneScramble) => {
                 fleet.scrambled_ticks = SCRAMBLE_TICKS;
@@ -783,6 +901,40 @@ fn thaw_equipment(mut equipment: ResMut<Equipment>) {
         .chain(equipment.sensor_frozen.iter_mut())
     {
         *ticks = ticks.saturating_sub(1);
+    }
+}
+
+/// Interior phase: the logistics spine (spec 015 section 4). Belts
+/// and pipes move one whole unit per tick from the room under their
+/// tail cell to the room under their head cell, in stable creation
+/// order; a full destination back-pressures and nothing vanishes. An
+/// edge touching a breached cell or a disabled room is severed, so
+/// cascade reach follows spine topology. Data lines carry rule
+/// signals; their authoring surface is a future spec (spec 015
+/// section 8).
+fn run_spine(hull: Res<HullGraph>, mut interior: ResMut<InteriorGrid>) {
+    for index in 0..interior.edges.len() {
+        let edge = interior.edges[index].clone();
+        if edge.kind == SpineKind::DataLine {
+            continue;
+        }
+        if interior.edge_severed(&edge, &hull) {
+            continue;
+        }
+        let (Some(src), Some(dst)) = (
+            interior.room_index_at(edge.from),
+            interior.room_index_at(edge.to),
+        ) else {
+            continue;
+        };
+        if src == dst {
+            continue;
+        }
+        let capacity = interior.rooms[dst].spec().buffer_capacity;
+        if interior.rooms[src].output_buffer > 0 && interior.rooms[dst].input_buffer < capacity {
+            interior.rooms[src].output_buffer -= 1;
+            interior.rooms[dst].input_buffer += 1;
+        }
     }
 }
 
@@ -841,13 +993,18 @@ fn feed_engine(routing: Res<Routing>, mut core: ResMut<EngineCore>, mut cargo: R
 /// Interior phase: the core burns against the torque-driven demand the
 /// world phase computed this tick, heating itself and leaking heat
 /// into its compartment (spec 004 section 3).
-fn burn_fuel(kinetics: Res<ShipKinetics>, field: Res<ThermalField>, mut core: ResMut<EngineCore>) {
+fn burn_fuel(
+    kinetics: Res<ShipKinetics>,
+    field: Res<ThermalField>,
+    interior: Res<InteriorGrid>,
+    mut core: ResMut<EngineCore>,
+) {
     let demand = kinetics.fuel_burn * TICK_SECONDS;
     let burned = demand.min(core.fuel_buffer);
     core.fuel_buffer -= burned;
     let heat = burned * HEAT_PER_FUEL;
-    let leak =
-        CORE_LEAK_PER_SECOND * (core.temperature - field.temps[CORE_COMPARTMENT]) * TICK_SECONDS;
+    let core_cell = field.temps[interior.core_cell_index()];
+    let leak = CORE_LEAK_PER_SECOND * (core.temperature - core_cell) * TICK_SECONDS;
     core.temperature += heat - leak;
 }
 
@@ -875,17 +1032,60 @@ fn route_coolant(
     }
 }
 
-/// Interior phase: thermal relaxation over the compartment ring,
-/// double buffered so iteration order cannot leak into state (spec 010
-/// section 5). Cold is the default (spec 004 section 5).
-fn update_thermal_field(core: Res<EngineCore>, mut field: ResMut<ThermalField>) {
-    let old = field.temps;
+/// Interior phase: thermal relaxation over the grid cells, double
+/// buffered so iteration order cannot leak into state (spec 010
+/// section 5; the field migrated from the bootstrap compartment ring
+/// onto the grid, spec 015 section 3). Heat sources are working
+/// rooms' emissions and the core's coupling into its own cells;
+/// sinks are Heat Sinks (negative emission), and every cell leaks
+/// toward the ambient cold (spec 004 section 5).
+fn update_thermal_field(
+    core: Res<EngineCore>,
+    hull: Res<HullGraph>,
+    interior: Res<InteriorGrid>,
+    mut field: ResMut<ThermalField>,
+) {
+    let old = field.temps.clone();
+    let mut emission = vec![0.0f32; GRID_W * GRID_H];
+    let mut core_cells = [false; GRID_W * GRID_H];
+    for room in &interior.rooms {
+        if room.kind == RoomKind::EngineCore {
+            for cell in room.cells() {
+                core_cells[cell.index()] = true;
+            }
+            continue;
+        }
+        // Stall and breach gate the emission: a stopped room neither
+        // heats nor cools (spec 015 section 3). The stall check reads
+        // the previous tick's temperatures, like the relaxation.
+        if !interior.room_working(room, &core, &field, &hull) {
+            continue;
+        }
+        let (w, h) = room.spec().footprint;
+        let per_cell = room.spec().heat_per_second / f32::from(w * h);
+        for cell in room.cells() {
+            emission[cell.index()] += per_cell;
+        }
+    }
     for (i, temp) in field.temps.iter_mut().enumerate() {
-        let left = old[(i + COMPARTMENTS - 1) % COMPARTMENTS];
-        let right = old[(i + 1) % COMPARTMENTS];
-        let mut delta = DIFFUSION_PER_SECOND * (left + right - 2.0 * old[i])
-            + HULL_LEAK_PER_SECOND * (AMBIENT_C - old[i]);
-        if i == CORE_COMPARTMENT {
+        let x = i % GRID_W;
+        let y = i / GRID_W;
+        let mut flux = 0.0;
+        if x > 0 {
+            flux += old[i - 1] - old[i];
+        }
+        if x + 1 < GRID_W {
+            flux += old[i + 1] - old[i];
+        }
+        if y > 0 {
+            flux += old[i - GRID_W] - old[i];
+        }
+        if y + 1 < GRID_H {
+            flux += old[i + GRID_W] - old[i];
+        }
+        let mut delta =
+            DIFFUSION_PER_SECOND * flux + HULL_LEAK_PER_SECOND * (AMBIENT_C - old[i]) + emission[i];
+        if core_cells[i] {
             delta += CORE_COUPLING_PER_SECOND * (core.temperature - old[i]);
         }
         *temp = old[i] + delta * TICK_SECONDS;
@@ -915,11 +1115,13 @@ fn advance_shutdown_ladder(mut core: ResMut<EngineCore>) {
 
 /// Interior phase: the standing repair line is drone work (spec 005
 /// sections 2 and 4). Each repair drone, in spawn order, serves the
-/// most stressed node in its zone (ties to the lowest index), drawing
-/// strut feedstock from the hold and accruing wear. Drones idle while
-/// the ladder has the drone bays down.
+/// most stressed hull node its cell-column zone maps onto (ties to
+/// the lowest index; spec 015 section 7 rebased zones onto the
+/// grid), drawing strut feedstock from the hold and accruing wear.
+/// Drones idle while the ladder has the drone bays down.
 fn run_drones(
     core: Res<EngineCore>,
+    interior: Res<InteriorGrid>,
     mut fleet: ResMut<DroneFleet>,
     mut hull: ResMut<HullGraph>,
     mut cargo: ResMut<CargoHold>,
@@ -939,9 +1141,13 @@ fn run_drones(
             continue;
         }
         let mut target: Option<usize> = None;
-        for node in drone.zone.from..=drone.zone.to {
-            let node = node as usize;
-            if node >= HULL_NODES || hull.stress[node] <= 0.0 {
+        for column in drone.zone.from..=drone.zone.to {
+            let column = column as usize;
+            if column >= GRID_W {
+                continue;
+            }
+            let node = interior.hull_node_of_column[column] as usize;
+            if hull.stress[node] <= 0.0 {
                 continue;
             }
             let better = match target {
@@ -1201,11 +1407,11 @@ mod tests {
             core.fuel_buffer = 0.0;
             core.temperature = AMBIENT_C;
         }
-        let before = sim.world.resource::<ThermalField>().temps;
+        let before = sim.world.resource::<ThermalField>().temps.clone();
         for _ in 0..600 {
             sim.tick();
         }
-        let after = sim.world.resource::<ThermalField>().temps;
+        let after = sim.world.resource::<ThermalField>().temps.clone();
         for (b, a) in before.iter().zip(after.iter()) {
             assert!(a < b, "a compartment failed to cool");
             assert!(*a >= AMBIENT_C, "a compartment overshot ambient");
@@ -1218,10 +1424,12 @@ mod tests {
     #[test]
     fn drones_repair_only_their_zones() {
         let mut sim = SimWorld::new(23);
-        // Shrink both zones onto nodes 0..=3, leaving node 6 orphaned.
+        // Move drone 1 onto columns 4..=7 (nodes 2..=3): both drones
+        // now patrol the port half, leaving node 6 (columns 12..=13)
+        // orphaned.
         sim.push_command(Command::SetDroneZone {
             drone: 1,
-            zone: DroneZone { from: 2, to: 3 },
+            zone: DroneZone { from: 4, to: 7 },
         });
         sim.world.resource_mut::<HullGraph>().stress[1] = 0.8;
         sim.world.resource_mut::<HullGraph>().stress[6] = 0.8;
@@ -1324,8 +1532,12 @@ mod tests {
         );
         sim.tick();
         let equipment = sim.world.resource::<Equipment>();
-        assert_eq!(equipment.valve_frozen[2], THAW_TICKS - 1);
-        assert_eq!(equipment.sensor_frozen[3], THAW_TICKS - 1);
+        // Node-targeted freezes resolve onto the node's column band
+        // (spec 015 section 7): node 2 is columns 4..=5, node 3 is
+        // columns 6..=7.
+        assert_eq!(equipment.valve_frozen[4], THAW_TICKS - 1);
+        assert_eq!(equipment.valve_frozen[5], THAW_TICKS - 1);
+        assert_eq!(equipment.sensor_frozen[6], THAW_TICKS - 1);
         let capability = sim.world.resource::<Capability>();
         assert!(capability.intake_capacity < 1.0);
         assert!(capability.sensor_coverage < 1.0);
@@ -1333,8 +1545,8 @@ mod tests {
             sim.tick();
         }
         let equipment = sim.world.resource::<Equipment>();
-        assert_eq!(equipment.valve_frozen[2], 0, "the valve never thawed");
-        assert_eq!(equipment.sensor_frozen[3], 0, "the sensor never thawed");
+        assert_eq!(equipment.valve_frozen[4], 0, "the valve never thawed");
+        assert_eq!(equipment.sensor_frozen[6], 0, "the sensor never thawed");
     }
 
     /// The emergency manual override thaws a node's equipment at once
@@ -1348,10 +1560,12 @@ mod tests {
             EventPayload::Weather(WeatherEvent::ValveFreeze { node: 5 }),
         );
         sim.tick();
-        assert!(sim.world.resource::<Equipment>().valve_frozen[5] > 0);
+        // Node 5's band is columns 10..=11.
+        assert!(sim.world.resource::<Equipment>().valve_frozen[10] > 0);
         sim.push_command(Command::ManualThaw { node: 5 });
         sim.tick();
-        assert_eq!(sim.world.resource::<Equipment>().valve_frozen[5], 0);
+        assert_eq!(sim.world.resource::<Equipment>().valve_frozen[10], 0);
+        assert_eq!(sim.world.resource::<Equipment>().valve_frozen[11], 0);
     }
 
     /// A drone scramble suppresses fleet logic for its window while
@@ -1477,6 +1691,345 @@ mod tests {
         assert!(weather.storms_seen > 0, "no storm in 6000 ticks");
     }
 
+    /// Spec 015 section 6 test 1: overlap, out-of-bounds,
+    /// unaffordable, and fixed-room orders are rejected with a typed
+    /// reason, and a rejected order touches nothing.
+    #[test]
+    fn build_orders_validate_and_reject_atomically() {
+        let mut sim = SimWorld::new(101);
+        let scrap = CargoHold::index(ResourceKind::FrozenScrap);
+        let grid_before = sim.world().resource::<InteriorGrid>().clone();
+        let scrap_before = sim.world().resource::<CargoHold>().amounts[scrap];
+        // Storage is 2x2: origin (15, 7) runs off both edges.
+        sim.push_command(Command::PlaceRoom {
+            kind: RoomKind::Storage,
+            origin: CellAddr {
+                deck: 0,
+                x: 15,
+                y: 7,
+            },
+        });
+        // The pre-placed engine core occupies (7..=8, 3..=4).
+        sim.push_command(Command::PlaceRoom {
+            kind: RoomKind::Storage,
+            origin: CellAddr {
+                deck: 0,
+                x: 8,
+                y: 4,
+            },
+        });
+        // The engine core is fixed: never player-placed.
+        sim.push_command(Command::PlaceRoom {
+            kind: RoomKind::EngineCore,
+            origin: CellAddr {
+                deck: 0,
+                x: 1,
+                y: 1,
+            },
+        });
+        sim.tick();
+        let reasons: Vec<RejectReason> = sim
+            .world()
+            .resource::<BuildLog>()
+            .0
+            .iter()
+            .map(|rejection| rejection.reason)
+            .collect();
+        assert_eq!(
+            reasons,
+            vec![
+                RejectReason::OutOfBounds,
+                RejectReason::Overlap,
+                RejectReason::FixedRoom
+            ]
+        );
+        assert_eq!(*sim.world().resource::<InteriorGrid>(), grid_before);
+        assert_eq!(
+            sim.world().resource::<CargoHold>().amounts[scrap],
+            scrap_before,
+            "a rejected order moved the build currency"
+        );
+
+        // Unaffordable: an empty hold rejects the order untouched.
+        sim.world.resource_mut::<CargoHold>().amounts = [0; ResourceKind::ALL.len()];
+        sim.push_command(Command::PlaceRoom {
+            kind: RoomKind::Storage,
+            origin: CellAddr {
+                deck: 0,
+                x: 1,
+                y: 1,
+            },
+        });
+        sim.tick();
+        assert_eq!(
+            sim.world().resource::<BuildLog>().0[0].reason,
+            RejectReason::Unaffordable
+        );
+        assert_eq!(*sim.world().resource::<InteriorGrid>(), grid_before);
+    }
+
+    /// Spec 015 section 6 test 2: build, run, tear out, rebuild: no
+    /// resource is created or destroyed except the declared refund
+    /// loss. Jettison refunds nothing and sheds mass at once. The
+    /// ship stays still so nothing else moves frozen scrap.
+    #[test]
+    fn refit_conserves_materials_except_the_declared_loss() {
+        let mut sim = SimWorld::new(103);
+        let scrap = CargoHold::index(ResourceKind::FrozenScrap);
+        let start = sim.world().resource::<CargoHold>().amounts[scrap];
+        let cost = room_spec(RoomKind::Fabricator).build_cost[scrap];
+        let refund = cost / grid::REFUND_DIVISOR;
+
+        sim.push_command(Command::PlaceRoom {
+            kind: RoomKind::Fabricator,
+            origin: CellAddr {
+                deck: 0,
+                x: 1,
+                y: 1,
+            },
+        });
+        sim.tick();
+        let placed_id = sim.world().resource::<InteriorGrid>().rooms[1].id;
+        assert_eq!(
+            sim.world().resource::<CargoHold>().amounts[scrap],
+            start - cost
+        );
+        for _ in 0..50 {
+            sim.tick();
+        }
+        sim.push_command(Command::RemoveRoom { room: placed_id });
+        sim.tick();
+        assert_eq!(
+            sim.world().resource::<CargoHold>().amounts[scrap],
+            start - cost + refund,
+            "tear-out lost something other than the declared refund loss"
+        );
+
+        // Rebuild, then jettison: no refund, immediate mass relief.
+        sim.push_command(Command::PlaceRoom {
+            kind: RoomKind::Fabricator,
+            origin: CellAddr {
+                deck: 0,
+                x: 1,
+                y: 1,
+            },
+        });
+        sim.tick();
+        let rebuilt_id = sim.world().resource::<InteriorGrid>().rooms[1].id;
+        let mass_loaded = sim.world().resource::<ShipKinetics>().total_mass;
+        sim.push_command(Command::Jettison { room: rebuilt_id });
+        sim.tick();
+        assert_eq!(
+            sim.world().resource::<CargoHold>().amounts[scrap],
+            start - cost + refund - cost,
+            "jettison refunded material"
+        );
+        assert!(
+            sim.world().resource::<ShipKinetics>().total_mass
+                < mass_loaded - room_spec(RoomKind::Fabricator).mass / 2.0,
+            "jettison did not shed the room's mass"
+        );
+    }
+
+    /// Spec 015 section 6 test 3: two identical layouts with
+    /// identical inputs route identically; edge processing order is
+    /// creation order, and a full destination back-pressures with
+    /// nothing vanishing.
+    #[test]
+    fn spine_routes_in_creation_order_with_back_pressure() {
+        let build = || {
+            let mut sim = SimWorld::new(107);
+            // Two suppliers flanking one destination, all adjacent.
+            for (kind, x) in [
+                (RoomKind::Storage, 1u8),
+                (RoomKind::Storage, 5),
+                (RoomKind::Fabricator, 3),
+            ] {
+                sim.push_command(Command::PlaceRoom {
+                    kind,
+                    origin: CellAddr { deck: 0, x, y: 1 },
+                });
+            }
+            sim.push_command(Command::LayEdge {
+                kind: SpineKind::Belt,
+                from: CellAddr {
+                    deck: 0,
+                    x: 2,
+                    y: 1,
+                },
+                to: CellAddr {
+                    deck: 0,
+                    x: 3,
+                    y: 1,
+                },
+            });
+            sim.push_command(Command::LayEdge {
+                kind: SpineKind::Belt,
+                from: CellAddr {
+                    deck: 0,
+                    x: 5,
+                    y: 1,
+                },
+                to: CellAddr {
+                    deck: 0,
+                    x: 4,
+                    y: 1,
+                },
+            });
+            sim.tick();
+            assert!(
+                sim.world().resource::<BuildLog>().0.is_empty(),
+                "the layout itself was rejected: {:?}",
+                sim.world().resource::<BuildLog>().0
+            );
+            {
+                let mut interior = sim.world.resource_mut::<InteriorGrid>();
+                interior.rooms[1].output_buffer = 5;
+                interior.rooms[2].output_buffer = 5;
+                // One slot left in the destination's input buffer.
+                let capacity = interior.rooms[3].spec().buffer_capacity;
+                interior.rooms[3].input_buffer = capacity - 1;
+            }
+            sim
+        };
+        let mut a = build();
+        let mut b = build();
+
+        a.tick();
+        let interior = a.world().resource::<InteriorGrid>();
+        assert_eq!(
+            interior.rooms[1].output_buffer, 4,
+            "the first-created edge should win the last slot"
+        );
+        assert_eq!(
+            interior.rooms[2].output_buffer, 5,
+            "the later edge should back-pressure, not drop"
+        );
+        let total: u32 = interior
+            .rooms
+            .iter()
+            .map(|room| room.input_buffer + room.output_buffer)
+            .sum();
+
+        for _ in 0..30 {
+            a.tick();
+            b.tick();
+        }
+        b.tick();
+        let after: u32 = a
+            .world()
+            .resource::<InteriorGrid>()
+            .rooms
+            .iter()
+            .map(|room| room.input_buffer + room.output_buffer)
+            .sum();
+        assert_eq!(total, after, "units vanished or appeared in transit");
+        assert_eq!(
+            a.save_bytes(),
+            b.save_bytes(),
+            "identical layouts routed differently"
+        );
+    }
+
+    /// Spec 015 section 6 test 4: a breach disables exactly its
+    /// cell's room and the dependents its severed spine cut off,
+    /// deterministically; a redundant route keeps its consumer fed.
+    #[test]
+    fn breach_disables_its_cell_and_severed_dependents() {
+        let mut sim = SimWorld::new(109);
+        // Supplier S on the hull row over node 1 (columns 2..=3),
+        // consumer D safely below it, and a redundant supplier R
+        // beside D, off the hull row.
+        sim.push_command(Command::PlaceRoom {
+            kind: RoomKind::Storage,
+            origin: CellAddr {
+                deck: 0,
+                x: 2,
+                y: 0,
+            },
+        });
+        sim.push_command(Command::PlaceRoom {
+            kind: RoomKind::Fabricator,
+            origin: CellAddr {
+                deck: 0,
+                x: 2,
+                y: 2,
+            },
+        });
+        sim.push_command(Command::PlaceRoom {
+            kind: RoomKind::Storage,
+            origin: CellAddr {
+                deck: 0,
+                x: 4,
+                y: 2,
+            },
+        });
+        sim.push_command(Command::LayEdge {
+            kind: SpineKind::Belt,
+            from: CellAddr {
+                deck: 0,
+                x: 2,
+                y: 1,
+            },
+            to: CellAddr {
+                deck: 0,
+                x: 2,
+                y: 2,
+            },
+        });
+        sim.push_command(Command::LayEdge {
+            kind: SpineKind::Belt,
+            from: CellAddr {
+                deck: 0,
+                x: 4,
+                y: 2,
+            },
+            to: CellAddr {
+                deck: 0,
+                x: 3,
+                y: 2,
+            },
+        });
+        sim.tick();
+        assert!(
+            sim.world().resource::<BuildLog>().0.is_empty(),
+            "the layout itself was rejected: {:?}",
+            sim.world().resource::<BuildLog>().0
+        );
+        {
+            let mut interior = sim.world.resource_mut::<InteriorGrid>();
+            interior.rooms[1].output_buffer = 10;
+            interior.rooms[3].output_buffer = 10;
+        }
+        sim.tick();
+        sim.tick();
+        let fed_by_both = sim.world().resource::<InteriorGrid>().rooms[2].input_buffer;
+        assert_eq!(fed_by_both, 4, "both routes should feed the consumer");
+
+        // Breach node 1: its hull-row cells (2..=3, 0) disable S and
+        // sever the S-to-D belt; R's redundant route keeps feeding.
+        sim.world.resource_mut::<HullGraph>().stress[1] = 1.0;
+        // Drones would repair the breach; this test wants it held.
+        sim.world.resource_mut::<DroneFleet>().drones.clear();
+        for _ in 0..4 {
+            sim.tick();
+        }
+        let interior = sim.world().resource::<InteriorGrid>();
+        let hull = sim.world().resource::<HullGraph>();
+        assert!(interior.room_disabled(&interior.rooms[1], hull));
+        assert!(!interior.room_disabled(&interior.rooms[2], hull));
+        assert!(!interior.room_disabled(&interior.rooms[3], hull));
+        assert_eq!(
+            interior.rooms[1].output_buffer, 8,
+            "the severed route kept moving units"
+        );
+        assert_eq!(
+            interior.rooms[2].input_buffer,
+            fed_by_both + 4,
+            "the redundant route stopped feeding the consumer"
+        );
+    }
+
     /// Spec 014 section 5 test 2: field lookups draw nothing from
     /// the event RNG. Two identical runs, one sensing the field
     /// heavily every tick: byte-identical end states.
@@ -1516,7 +2069,7 @@ mod tests {
         // growth halts, and the map is not erased. The capability
         // lag means the tick after the freeze still reveals, so the
         // baseline is captured after it.
-        sim.world.resource_mut::<Equipment>().sensor_frozen = [u32::MAX; HULL_NODES];
+        sim.world.resource_mut::<Equipment>().sensor_frozen = [u32::MAX; GRID_W];
         sim.tick();
         let frozen = sim.world().resource::<WorldDomain>().fog.revealed.clone();
         assert!(!frozen.is_empty(), "zero coverage erased the map");

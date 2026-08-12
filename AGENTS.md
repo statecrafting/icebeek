@@ -89,15 +89,14 @@ review; approved specs are settled authority.
 | 18 | `017-save-versioning` | approved (2026-08-11) |
 
 Next pending: the growth ring 014 through 017 passed its human
-checkpoint on 2026-08-11; 017 (save versioning) and 014 (world
-content) are implemented. Saves travel in the versioned envelope
-(format v2 after 014's bump for the map seed, Fog of Winter, and
-prow wear), the ice field derives on demand from the map seed, and
-the exterior draws topography and fog from the snapshot's terrain
-window. Implementation continues in the recorded order: 015
-(interior grid, whose section 7 rebase 017 has unblocked) next, then
-016 (tech tiers, which also amends spec 011 with the Salvage
-family).
+checkpoint on 2026-08-11; 017 (save versioning), 014 (world
+content), and 015 (interior grid) are implemented. Saves are at
+format v3: the bootstrap compartment ring is retired, thermal state
+is per grid cell, equipment and drone zones live on cell columns,
+and the buildable grid (rooms, spine, refit, breach cascades) is in
+the sim with its migration chain exercised against the frozen v1 and
+v2 fixtures. One spec remains: 016 (tech tiers), which also amends
+spec 011 with the Salvage event family.
 
 ## Available Agents
 

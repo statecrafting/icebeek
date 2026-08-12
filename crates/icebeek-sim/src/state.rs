@@ -8,14 +8,11 @@ use bevy_ecs::prelude::Resource;
 use icebeek_events::{Event, EventPayload, EventQueue, ResourceKind, Tick};
 use serde::{Deserialize, Serialize};
 
+use crate::grid::{CellAddr, GRID_H, GRID_W, RoomKind, SpineKind};
+
 /// Hull-graph node count for the bootstrap slice. The real graph grows
 /// with the hull-graph domain (spec 010 section 5).
 pub const HULL_NODES: usize = 8;
-
-/// Thermal compartments align one-to-one with hull-graph nodes for the
-/// vertical slice; the real room graph arrives with the interior grid
-/// domain (spec 010 section 5).
-pub const COMPARTMENTS: usize = HULL_NODES;
 
 /// Ambient exterior temperature in degrees C: cold is the default
 /// (spec 004 section 5). Balancing placeholder.
@@ -91,6 +88,21 @@ impl CargoHold {
 
     pub fn amount(&self, resource: ResourceKind) -> u64 {
         self.amounts[Self::index(resource)]
+    }
+
+    /// Whether every per-resource entry of a cost is covered.
+    pub fn can_afford(&self, cost: &[u64; ResourceKind::ALL.len()]) -> bool {
+        self.amounts
+            .iter()
+            .zip(cost)
+            .all(|(have, need)| have >= need)
+    }
+
+    /// Deduct a cost `can_afford` approved.
+    pub fn deduct(&mut self, cost: &[u64; ResourceKind::ALL.len()]) {
+        for (have, need) in self.amounts.iter_mut().zip(cost) {
+            *have -= need;
+        }
     }
 
     /// A fresh run's provisions: enough fuel, coolant stock, and strut
@@ -173,7 +185,10 @@ pub enum DroneKind {
     Logistics,
 }
 
-/// A contiguous, inclusive hull-node range a drone patrols.
+/// A contiguous, inclusive range of grid cell columns a drone
+/// patrols (rebased from hull nodes onto the grid, spec 015 section
+/// 7). The stored column-to-node mapping resolves which hull nodes
+/// the zone serves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DroneZone {
     pub from: u32,
@@ -181,8 +196,8 @@ pub struct DroneZone {
 }
 
 impl DroneZone {
-    pub fn contains(&self, node: u32) -> bool {
-        node >= self.from && node <= self.to
+    pub fn contains(&self, column: u32) -> bool {
+        column >= self.from && column <= self.to
     }
 }
 
@@ -217,20 +232,24 @@ pub struct DroneFleet {
 
 impl Default for DroneFleet {
     fn default() -> Self {
-        // A fresh run ships with two repair drones splitting the hull.
+        // A fresh run ships with two repair drones splitting the
+        // hull's cell columns.
         Self {
             drones: vec![
                 Drone {
                     kind: DroneKind::Repair,
-                    zone: DroneZone { from: 0, to: 3 },
+                    zone: DroneZone {
+                        from: 0,
+                        to: (GRID_W / 2 - 1) as u32,
+                    },
                     wear: 0.0,
                     strut_meter: 0.0,
                 },
                 Drone {
                     kind: DroneKind::Repair,
                     zone: DroneZone {
-                        from: 4,
-                        to: (HULL_NODES - 1) as u32,
+                        from: (GRID_W / 2) as u32,
+                        to: (GRID_W - 1) as u32,
                     },
                     wear: 0.0,
                     strut_meter: 0.0,
@@ -241,30 +260,31 @@ impl Default for DroneFleet {
     }
 }
 
-/// The first slice of the interior grid domain (spec 004 section 4):
-/// fixed intake valves and external sensors at hull nodes. Rooms and
-/// the logistics spine arrive with the buildable grid. A nonzero entry
-/// is a frozen unit counting down to thaw (spec 006 section 5).
+/// Fixed intake valves and external sensors, one of each per
+/// hull-row cell column: equipment locations live on grid cells
+/// (spec 015 section 7). A nonzero entry is a frozen unit counting
+/// down to thaw (spec 006 section 5); weather freeze events target
+/// hull nodes and resolve onto the node's column band.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Resource)]
 pub struct Equipment {
-    pub valve_frozen: [u32; HULL_NODES],
-    pub sensor_frozen: [u32; HULL_NODES],
+    pub valve_frozen: [u32; GRID_W],
+    pub sensor_frozen: [u32; GRID_W],
 }
 
 impl Default for Equipment {
     fn default() -> Self {
         Self {
-            valve_frozen: [0; HULL_NODES],
-            sensor_frozen: [0; HULL_NODES],
+            valve_frozen: [0; GRID_W],
+            sensor_frozen: [0; GRID_W],
         }
     }
 }
 
 impl Equipment {
     /// Fraction of units in the given bank that are not frozen.
-    pub fn working_fraction(bank: &[u32; HULL_NODES]) -> f32 {
+    pub fn working_fraction(bank: &[u32; GRID_W]) -> f32 {
         let working = bank.iter().filter(|ticks| **ticks == 0).count();
-        working as f32 / HULL_NODES as f32
+        working as f32 / GRID_W as f32
     }
 }
 
@@ -389,18 +409,19 @@ impl Default for Routing {
     }
 }
 
-/// Thermal field domain (spec 004 section 5): compartment temperatures
-/// in degrees C, indexed like hull-graph nodes for the vertical slice.
+/// Thermal field domain (spec 004 section 5): per-cell temperatures
+/// in degrees C over the interior grid, row-major (spec 015 section
+/// 3: the field migrated here from the bootstrap compartment ring).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Resource)]
 pub struct ThermalField {
-    pub temps: [f32; COMPARTMENTS],
+    pub temps: Vec<f32>,
 }
 
 impl Default for ThermalField {
     fn default() -> Self {
         // A freshly provisioned ship starts habitable, not frozen.
         Self {
-            temps: [15.0; COMPARTMENTS],
+            temps: vec![15.0; GRID_W * GRID_H],
         }
     }
 }
@@ -476,10 +497,36 @@ pub enum Command {
     SetAnchor {
         anchored: bool,
     },
-    /// Emergency manual override: thaw the frozen valve and sensor at
-    /// a node immediately (spec 006 section 5).
+    /// Emergency manual override: thaw the frozen valves and sensors
+    /// across a hull node's column band immediately (spec 006
+    /// section 5).
     ManualThaw {
         node: u32,
+    },
+    /// Place a room module (spec 015 section 5); validated against
+    /// bounds, overlap, and cargo cost.
+    PlaceRoom {
+        kind: RoomKind,
+        origin: CellAddr,
+    },
+    /// Tear a room out, refunding the fixed fraction of its cost.
+    RemoveRoom {
+        room: u32,
+    },
+    /// Emergency remove-without-refund plus immediate mass relief
+    /// (spec 005 section 5): the lever costs real material.
+    Jettison {
+        room: u32,
+    },
+    /// Lay a typed spine edge across one cell boundary.
+    LayEdge {
+        kind: SpineKind,
+        from: CellAddr,
+        to: CellAddr,
+    },
+    /// Remove a spine edge (no refund at the edge's unit cost).
+    RemoveEdge {
+        edge: u32,
     },
 }
 
