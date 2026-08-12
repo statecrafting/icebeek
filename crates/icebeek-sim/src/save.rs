@@ -19,7 +19,7 @@ use crate::{SaveState, TICK_HZ};
 /// changes (spec 011 section 6), increments this by one and either
 /// appends the matching step to `MIGRATIONS` or states in the bump
 /// PR that older saves are now refused (spec 017 section 4).
-pub const SAVE_FORMAT_VERSION: u32 = 3;
+pub const SAVE_FORMAT_VERSION: u32 = 4;
 
 /// Typed load refusals (spec 017 section 3). Every branch names the
 /// versions involved; no load path panics or partially applies.
@@ -101,6 +101,10 @@ static MIGRATIONS: &[Migration] = &[
     Migration {
         from: 2,
         run: migrate_v2_to_v3,
+    },
+    Migration {
+        from: 3,
+        run: migrate_v3_to_v4,
     },
 ];
 
@@ -232,6 +236,36 @@ fn migrate_v2_to_v3(mut envelope: Value) -> Result<Value, String> {
     Ok(envelope)
 }
 
+/// v3 to v4 (spec 016, tech mechanisms): the tech domain arrives at
+/// its fresh-run default (tier 1, zero research, an empty blueprint
+/// set, an idle refine meter) and ship kinetics gains the tier-1
+/// prow track. The Salvage event family also joins the event enum
+/// (the spec 011 section 4 amendment); a v3 queue cannot contain the
+/// new variants, so no queue rewrite is needed. Gameplay-visible
+/// consequence: none beyond starting the progression arc from
+/// scratch, which is also the fresh-run behavior.
+fn migrate_v3_to_v4(mut envelope: Value) -> Result<Value, String> {
+    let payload = envelope
+        .get_mut("payload")
+        .and_then(Value::as_object_mut)
+        .ok_or("v3 save has no payload")?;
+    payload.insert(
+        "tech".into(),
+        serde_json::json!({
+            "tier": 1,
+            "research": 0,
+            "blueprints": [],
+            "refine_meter": 0.0
+        }),
+    );
+    let kinetics = payload
+        .get_mut("kinetics")
+        .and_then(Value::as_object_mut)
+        .ok_or("v3 save has no kinetics domain")?;
+    kinetics.insert("prow_track".into(), "Ram".into());
+    Ok(envelope)
+}
+
 /// The write-side envelope (spec 017 section 2). `crate_version` and
 /// `tick_hz` are diagnostics; `format_version` is the authority.
 #[derive(Serialize)]
@@ -351,6 +385,7 @@ mod tests {
         (1, include_str!("../fixtures/format-v1.json")),
         (2, include_str!("../fixtures/format-v2.json")),
         (3, include_str!("../fixtures/format-v3.json")),
+        (4, include_str!("../fixtures/format-v4.json")),
     ];
 
     /// A deterministic scripted run rich enough that every domain

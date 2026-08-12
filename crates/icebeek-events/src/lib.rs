@@ -26,8 +26,9 @@ pub struct Event {
     pub payload: EventPayload,
 }
 
-/// The initial family roster (spec 011 section 4). New variants and
-/// families are amendments to spec 011.
+/// The family roster (spec 011 section 4). New variants and
+/// families are amendments to spec 011; the Salvage family joined by
+/// the spec 016 amendment.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EventPayload {
     /// Prow strike or hull contact: a stress spike at a hull node.
@@ -42,6 +43,7 @@ pub enum EventPayload {
     },
     Weather(WeatherEvent),
     Expedition(ExpeditionEvent),
+    Salvage(SalvageEvent),
 }
 
 /// The raw materials ground out of the ice (spec 003 section 2).
@@ -82,6 +84,18 @@ pub enum ExpeditionEvent {
     IceShiftWarning { magnitude: f32 },
     CrushProgress { pressure: f32 },
     RoverReturn,
+}
+
+/// Tier-gating blueprints come from the world (spec 007 section 4,
+/// spec 016 section 3): trapped shipwrecks in pack ice, caches inside
+/// breached glacial walls, and Iceberg Node vaults. Each carries the
+/// blueprint id it delivers; blueprints are unique flags on the tech
+/// domain, never stock.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum SalvageEvent {
+    WreckSalvage { blueprint: u32 },
+    WallCache { blueprint: u32 },
+    NodeVault { blueprint: u32 },
 }
 
 /// FIFO by `(tick, seq)`; backlog is legal and persists in order; the
@@ -147,6 +161,9 @@ mod tests {
             EventPayload::Expedition(ExpeditionEvent::IceShiftWarning { magnitude: 0.5 }),
             EventPayload::Expedition(ExpeditionEvent::CrushProgress { pressure: 0.9 }),
             EventPayload::Expedition(ExpeditionEvent::RoverReturn),
+            EventPayload::Salvage(SalvageEvent::WreckSalvage { blueprint: 1 }),
+            EventPayload::Salvage(SalvageEvent::WallCache { blueprint: 2 }),
+            EventPayload::Salvage(SalvageEvent::NodeVault { blueprint: 3 }),
         ];
         for resource in ResourceKind::ALL {
             payloads.push(EventPayload::Ingestion {

@@ -35,6 +35,6 @@
     "summary": "The contract for crates/icebeek-events, the engine-free vocabulary crate for the spec 002 coupling contract. It defines the event envelope (emission tick, deterministic sequence number, and, where the family calls for it, hull-graph location and magnitude), the initial event families (Impact, Ingestion, Weather, Expedition), and the queue semantics: FIFO ordered by tick and sequence, visible to the interior phase of the same tick, backlog legal, serialized whole into saves. Events are pure data: the crate contains types and the queue container, no systems, no callbacks, no game logic, and depends on serde and the standard library only. Player command types are explicitly not here; they live in icebeek-sim per spec 010 section 6. The crate directory edge is added when the crate lands; until then this spec owns its design brief.\n",
     "title": "Event bus: the typed exterior-traffic vocabulary"
   },
-  "shardHash": "1a88d85159b867186cf09f0482a39c2a0aae6e3fdb123bcf844350d07fc88e30",
+  "shardHash": "2faac54635486652d0d1e1ca1fddc1f6ce46fe8b3a28d8cfa6de3ad0c791a6c6",
   "specVersion": "1.1.0"
 }

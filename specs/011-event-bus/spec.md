@@ -79,6 +79,13 @@ family, and new families, are added by amending this spec:
   logic scramble. Weather targets systems, not hit points.
 - **Expedition** (spec 006 §4): anchor set, ice-shift warnings,
   crush-pressure progression while anchored, rover return.
+- **Salvage** (spec 007 §4, added by the spec 016 amendment):
+  tier-gating blueprints traveling in from the world as
+  `WreckSalvage` (trapped shipwrecks in pack ice), `WallCache`
+  (caches inside breached glacial walls), and `NodeVault` (Iceberg
+  Node vaults), each carrying a blueprint id. The interior resolves
+  them into the tech domain's blueprint set; duplicates convert to
+  research (spec 016 §3).
 
 The interior may not receive information any event does not carry:
 if a design needs the Micro to react to something new, that something
